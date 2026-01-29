@@ -1,0 +1,983 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monitor SO2 Volcánico</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css"/>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary-color: #2c3e50;
+            --secondary-color: #3498db;
+            --accent-color: #e74c3c;
+            --background: #ecf0f1;
+            --card-bg: #ffffff;
+            --text-color: #2c3e50;
+            --border-radius: 8px;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--background);
+            color: var(--text-color);
+        }
+
+        /* Navegación */
+        nav {
+            background: var(--primary-color);
+            color: white;
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        nav h1 {
+            font-size: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        nav h1 i {
+            color: var(--accent-color);
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 20px;
+        }
+
+        .nav-links a {
+            color: white;
+            text-decoration: none;
+            padding: 8px 16px;
+            border-radius: var(--border-radius);
+            transition: background 0.3s;
+        }
+
+        .nav-links a:hover, .nav-links a.active {
+            background: rgba(255,255,255,0.1);
+        }
+
+        /* Contenedor principal */
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        /* Pestañas de contenido */
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        /* Tarjetas */
+        .card {
+            background: var(--card-bg);
+            border-radius: var(--border-radius);
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        }
+
+        .card h2 {
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid var(--secondary-color);
+            font-size: 1.2rem;
+        }
+
+        /* Grid layout */
+        .grid {
+            display: grid;
+            gap: 20px;
+        }
+
+        .grid-2 {
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        }
+
+        .grid-3 {
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        }
+
+        /* Formularios */
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+        }
+
+        .form-group input, .form-group select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: var(--border-radius);
+            font-size: 1rem;
+        }
+
+        .form-group input:focus, .form-group select:focus {
+            outline: none;
+            border-color: var(--secondary-color);
+        }
+
+        /* Botones */
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: var(--border-radius);
+            cursor: pointer;
+            font-size: 1rem;
+            transition: all 0.3s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background: var(--secondary-color);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #2980b9;
+        }
+
+        .btn-danger {
+            background: var(--accent-color);
+            color: white;
+        }
+
+        .btn-success {
+            background: #27ae60;
+            color: white;
+        }
+
+        /* Tablas */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+        }
+
+        th {
+            background: var(--primary-color);
+            color: white;
+        }
+
+        tr:hover {
+            background: #f5f5f5;
+        }
+
+        /* Badges */
+        .badge {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+
+        .badge-success {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .badge-warning {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .badge-danger {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        /* Stats boxes */
+        .stat-box {
+            text-align: center;
+            padding: 20px;
+        }
+
+        .stat-box .value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: var(--secondary-color);
+        }
+
+        .stat-box .label {
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        /* Mapa */
+        #map {
+            height: 400px;
+            border-radius: var(--border-radius);
+        }
+
+        /* Gráfico */
+        .chart-container {
+            position: relative;
+            height: 300px;
+        }
+
+        /* Lista de volcanes */
+        .volcano-list {
+            list-style: none;
+        }
+
+        .volcano-item {
+            padding: 15px;
+            border-bottom: 1px solid #eee;
+            cursor: pointer;
+            transition: background 0.3s;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .volcano-item:hover {
+            background: #f5f5f5;
+        }
+
+        .volcano-item.selected {
+            background: #e3f2fd;
+            border-left: 3px solid var(--secondary-color);
+        }
+
+        /* Loading */
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+
+        .loading i {
+            font-size: 2rem;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Alertas */
+        .alert {
+            padding: 15px;
+            border-radius: var(--border-radius);
+            margin-bottom: 15px;
+        }
+
+        .alert-info {
+            background: #e3f2fd;
+            color: #1565c0;
+        }
+
+        .alert-success {
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
+
+        .alert-error {
+            background: #ffebee;
+            color: #c62828;
+        }
+    </style>
+</head>
+<body>
+    <nav>
+        <h1><i class="fas fa-mountain"></i> Monitor SO2 Volcánico</h1>
+        <div class="nav-links">
+            <a href="#" onclick="showTab('dashboard')" class="active" id="nav-dashboard">
+                <i class="fas fa-chart-line"></i> Dashboard
+            </a>
+            <a href="#" onclick="showTab('volcanes')" id="nav-volcanes">
+                <i class="fas fa-fire"></i> Volcanes
+            </a>
+            <a href="#" onclick="showTab('extraccion')" id="nav-extraccion">
+                <i class="fas fa-download"></i> Extracción
+            </a>
+            <a href="#" onclick="showTab('resultados')" id="nav-resultados">
+                <i class="fas fa-table"></i> Resultados
+            </a>
+        </div>
+    </nav>
+
+    <div class="container">
+        <!-- Dashboard -->
+        <div id="tab-dashboard" class="tab-content active">
+            <div class="grid grid-3">
+                <div class="card stat-box">
+                    <div class="value" id="stat-volcanes">-</div>
+                    <div class="label">Volcanes Monitoreados</div>
+                </div>
+                <div class="card stat-box">
+                    <div class="value" id="stat-imagenes">-</div>
+                    <div class="label">Imágenes Procesadas</div>
+                </div>
+                <div class="card stat-box">
+                    <div class="value" id="stat-ultimo-flujo">-</div>
+                    <div class="label">Último Flujo (ton/día)</div>
+                </div>
+            </div>
+
+            <div class="grid grid-2">
+                <div class="card">
+                    <h2><i class="fas fa-map-marked-alt"></i> Mapa de Volcanes</h2>
+                    <div id="map"></div>
+                </div>
+                <div class="card">
+                    <h2><i class="fas fa-chart-area"></i> Serie Temporal de Flujo</h2>
+                    <div class="form-group">
+                        <select id="volcan-chart-select" onchange="actualizarGrafico()">
+                            <option value="">Seleccione un volcán</option>
+                        </select>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="flujoChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Volcanes -->
+        <div id="tab-volcanes" class="tab-content">
+            <div class="grid grid-2">
+                <div class="card">
+                    <h2><i class="fas fa-plus"></i> Agregar Volcán</h2>
+                    <form id="form-volcan">
+                        <div class="form-group">
+                            <label>Volcanes Predefinidos</label>
+                            <select id="volcan-predefinido">
+                                <option value="">-- Seleccione o ingrese manualmente --</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Nombre</label>
+                            <input type="text" id="volcan-nombre" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Latitud</label>
+                            <input type="number" id="volcan-lat" step="0.001" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Longitud</label>
+                            <input type="number" id="volcan-lon" step="0.001" required>
+                        </div>
+                        <div class="form-group">
+                            <label>País</label>
+                            <input type="text" id="volcan-pais">
+                        </div>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-save"></i> Guardar Volcán
+                        </button>
+                    </form>
+                </div>
+                <div class="card">
+                    <h2><i class="fas fa-list"></i> Volcanes Registrados</h2>
+                    <ul class="volcano-list" id="lista-volcanes">
+                        <li class="loading"><i class="fas fa-spinner"></i> Cargando...</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Extracción -->
+        <div id="tab-extraccion" class="tab-content">
+            <div class="grid grid-2">
+                <div class="card">
+                    <h2><i class="fas fa-satellite"></i> Nueva Extracción TROPOMI</h2>
+                    <form id="form-extraccion">
+                        <div class="form-group">
+                            <label>Volcán</label>
+                            <select id="extraccion-volcan" required>
+                                <option value="">Seleccione un volcán</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Fecha Inicio</label>
+                            <input type="date" id="extraccion-inicio" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Fecha Fin</label>
+                            <input type="date" id="extraccion-fin" required>
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="extraccion-descargar" checked>
+                                Descargar archivos automáticamente
+                            </label>
+                        </div>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-play"></i> Iniciar Extracción
+                        </button>
+                    </form>
+                    <div id="extraccion-resultado" class="alert" style="display:none; margin-top:15px;"></div>
+                </div>
+                <div class="card">
+                    <h2><i class="fas fa-images"></i> Imágenes Disponibles</h2>
+                    <div class="form-group">
+                        <select id="imagenes-volcan" onchange="cargarImagenes()">
+                            <option value="">Todos los volcanes</option>
+                        </select>
+                    </div>
+                    <table id="tabla-imagenes">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Fecha</th>
+                                <th>Estado</th>
+                                <th>Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr><td colspan="4" class="loading"><i class="fas fa-spinner"></i></td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Resultados -->
+        <div id="tab-resultados" class="tab-content">
+            <div class="card">
+                <h2><i class="fas fa-database"></i> Resultados de Flujo SO2</h2>
+                <div class="grid grid-3" style="margin-bottom: 20px;">
+                    <div class="form-group">
+                        <label>Volcán</label>
+                        <select id="resultados-volcan">
+                            <option value="">Todos</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Desde</label>
+                        <input type="date" id="resultados-desde">
+                    </div>
+                    <div class="form-group">
+                        <label>Hasta</label>
+                        <input type="date" id="resultados-hasta">
+                    </div>
+                </div>
+                <button class="btn btn-primary" onclick="cargarResultados()">
+                    <i class="fas fa-search"></i> Buscar
+                </button>
+                <button class="btn btn-success" onclick="exportarCSV()">
+                    <i class="fas fa-file-csv"></i> Exportar CSV
+                </button>
+                <table id="tabla-resultados" style="margin-top: 20px;">
+                    <thead>
+                        <tr>
+                            <th>Fecha/Hora</th>
+                            <th>Flujo (kg/s)</th>
+                            <th>Flujo (ton/día)</th>
+                            <th>Viento (m/s)</th>
+                            <th>Dirección</th>
+                            <th>Calidad</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tbody-resultados">
+                        <tr><td colspan="6">Seleccione filtros y presione Buscar</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Configuración de la API
+        const API_BASE = 'http://localhost:8000/api';
+        
+        // Variables globales
+        let map = null;
+        let chart = null;
+        let volcanes = [];
+        let resultadosData = [];
+
+        // Inicialización
+        document.addEventListener('DOMContentLoaded', () => {
+            initMap();
+            cargarVolcanes();
+            cargarVolcanesPredefinidos();
+            setFechasDefault();
+        });
+
+        // Navegación por pestañas
+        function showTab(tabId) {
+            // Ocultar todas las pestañas
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            document.querySelectorAll('.nav-links a').forEach(link => {
+                link.classList.remove('active');
+            });
+
+            // Mostrar pestaña seleccionada
+            document.getElementById('tab-' + tabId).classList.add('active');
+            document.getElementById('nav-' + tabId).classList.add('active');
+
+            // Acciones específicas por pestaña
+            if (tabId === 'dashboard') {
+                setTimeout(() => map.invalidateSize(), 100);
+            }
+        }
+
+        // Inicializar mapa
+        function initMap() {
+            map = L.map('map').setView([0, 0], 2);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors'
+            }).addTo(map);
+        }
+
+        // Cargar volcanes
+        async function cargarVolcanes() {
+            try {
+                const response = await fetch(`${API_BASE}/volcanes`);
+                volcanes = await response.json();
+                
+                actualizarListaVolcanes();
+                actualizarSelectsVolcanes();
+                actualizarMapaVolcanes();
+                actualizarEstadisticas();
+            } catch (error) {
+                console.error('Error cargando volcanes:', error);
+            }
+        }
+
+        // Actualizar lista de volcanes
+        function actualizarListaVolcanes() {
+            const lista = document.getElementById('lista-volcanes');
+            
+            if (volcanes.length === 0) {
+                lista.innerHTML = '<li class="volcano-item">No hay volcanes registrados</li>';
+                return;
+            }
+
+            lista.innerHTML = volcanes.map(v => `
+                <li class="volcano-item" onclick="seleccionarVolcan(${v.id})">
+                    <div>
+                        <strong>${v.nombre}</strong>
+                        <small style="display:block;color:#666">
+                            ${v.pais || 'Sin país'} | ${v.latitud.toFixed(3)}, ${v.longitud.toFixed(3)}
+                        </small>
+                    </div>
+                    <span class="badge ${v.activo ? 'badge-success' : 'badge-warning'}">
+                        ${v.activo ? 'Activo' : 'Inactivo'}
+                    </span>
+                </li>
+            `).join('');
+        }
+
+        // Actualizar selects de volcanes
+        function actualizarSelectsVolcanes() {
+            const opciones = volcanes.map(v => 
+                `<option value="${v.id}">${v.nombre}</option>`
+            ).join('');
+
+            ['extraccion-volcan', 'imagenes-volcan', 'resultados-volcan', 'volcan-chart-select'].forEach(id => {
+                const select = document.getElementById(id);
+                if (select) {
+                    const placeholder = select.options[0];
+                    select.innerHTML = '';
+                    select.appendChild(placeholder);
+                    select.innerHTML += opciones;
+                }
+            });
+        }
+
+        // Actualizar mapa
+        function actualizarMapaVolcanes() {
+            // Limpiar marcadores existentes
+            map.eachLayer(layer => {
+                if (layer instanceof L.Marker) {
+                    map.removeLayer(layer);
+                }
+            });
+
+            // Agregar marcadores
+            const bounds = [];
+            volcanes.forEach(v => {
+                const marker = L.marker([v.latitud, v.longitud])
+                    .addTo(map)
+                    .bindPopup(`
+                        <strong>${v.nombre}</strong><br>
+                        ${v.pais || ''}<br>
+                        <small>${v.latitud.toFixed(4)}, ${v.longitud.toFixed(4)}</small>
+                    `);
+                bounds.push([v.latitud, v.longitud]);
+            });
+
+            if (bounds.length > 0) {
+                map.fitBounds(bounds, { padding: [50, 50] });
+            }
+        }
+
+        // Cargar volcanes predefinidos
+        async function cargarVolcanesPredefinidos() {
+            try {
+                const response = await fetch(`${API_BASE}/volcanes/predefinidos`);
+                const predefinidos = await response.json();
+                
+                const select = document.getElementById('volcan-predefinido');
+                Object.entries(predefinidos).forEach(([clave, datos]) => {
+                    const option = document.createElement('option');
+                    option.value = clave;
+                    option.textContent = `${datos.nombre} (${datos.pais})`;
+                    option.dataset.lat = datos.lat;
+                    option.dataset.lon = datos.lon;
+                    option.dataset.nombre = datos.nombre;
+                    option.dataset.pais = datos.pais;
+                    select.appendChild(option);
+                });
+            } catch (error) {
+                console.error('Error cargando predefinidos:', error);
+            }
+        }
+
+        // Seleccionar volcán predefinido
+        document.getElementById('volcan-predefinido').addEventListener('change', function() {
+            if (this.value) {
+                const option = this.options[this.selectedIndex];
+                document.getElementById('volcan-nombre').value = option.dataset.nombre;
+                document.getElementById('volcan-lat').value = option.dataset.lat;
+                document.getElementById('volcan-lon').value = option.dataset.lon;
+                document.getElementById('volcan-pais').value = option.dataset.pais;
+            }
+        });
+
+        // Formulario de volcán
+        document.getElementById('form-volcan').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const datos = {
+                nombre: document.getElementById('volcan-nombre').value,
+                latitud: parseFloat(document.getElementById('volcan-lat').value),
+                longitud: parseFloat(document.getElementById('volcan-lon').value),
+                pais: document.getElementById('volcan-pais').value || null
+            };
+
+            try {
+                const response = await fetch(`${API_BASE}/volcanes`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(datos)
+                });
+
+                if (response.ok) {
+                    alert('Volcán guardado correctamente');
+                    this.reset();
+                    cargarVolcanes();
+                } else {
+                    const error = await response.json();
+                    alert('Error: ' + error.detail);
+                }
+            } catch (error) {
+                alert('Error de conexión');
+            }
+        });
+
+        // Formulario de extracción
+        document.getElementById('form-extraccion').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const datos = {
+                volcan_id: parseInt(document.getElementById('extraccion-volcan').value),
+                fecha_inicio: document.getElementById('extraccion-inicio').value + 'T00:00:00',
+                fecha_fin: document.getElementById('extraccion-fin').value + 'T23:59:59',
+                descargar: document.getElementById('extraccion-descargar').checked
+            };
+
+            const resultDiv = document.getElementById('extraccion-resultado');
+            resultDiv.style.display = 'block';
+            resultDiv.className = 'alert alert-info';
+            resultDiv.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Iniciando extracción...';
+
+            try {
+                const response = await fetch(`${API_BASE}/extraccion/iniciar`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(datos)
+                });
+
+                const result = await response.json();
+                
+                if (response.ok) {
+                    resultDiv.className = 'alert alert-success';
+                    resultDiv.innerHTML = `<i class="fas fa-check"></i> ${result.mensaje}`;
+                } else {
+                    resultDiv.className = 'alert alert-error';
+                    resultDiv.innerHTML = `<i class="fas fa-times"></i> Error: ${result.detail}`;
+                }
+            } catch (error) {
+                resultDiv.className = 'alert alert-error';
+                resultDiv.innerHTML = '<i class="fas fa-times"></i> Error de conexión';
+            }
+        });
+
+        // Cargar imágenes
+        async function cargarImagenes() {
+            const volcanId = document.getElementById('imagenes-volcan').value;
+            const tbody = document.querySelector('#tabla-imagenes tbody');
+            
+            tbody.innerHTML = '<tr><td colspan="4" class="loading"><i class="fas fa-spinner fa-spin"></i></td></tr>';
+
+            try {
+                let url = `${API_BASE}/imagenes?limite=50`;
+                if (volcanId) url += `&volcan_id=${volcanId}`;
+
+                const response = await fetch(url);
+                const imagenes = await response.json();
+
+                if (imagenes.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="4">No hay imágenes</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = imagenes.map(img => `
+                    <tr>
+                        <td>${img.id}</td>
+                        <td>${new Date(img.fecha_adquisicion).toLocaleString()}</td>
+                        <td>
+                            ${img.descargado ? 
+                                (img.procesado ? 
+                                    '<span class="badge badge-success">Procesado</span>' : 
+                                    '<span class="badge badge-warning">Descargado</span>') :
+                                '<span class="badge badge-danger">Pendiente</span>'}
+                        </td>
+                        <td>
+                            ${!img.procesado && img.descargado ?
+                                `<button class="btn btn-primary" onclick="procesarImagen(${img.id})" style="padding:5px 10px;">
+                                    <i class="fas fa-cog"></i>
+                                </button>` : ''}
+                        </td>
+                    </tr>
+                `).join('');
+            } catch (error) {
+                tbody.innerHTML = '<tr><td colspan="4">Error cargando imágenes</td></tr>';
+            }
+        }
+
+        // Procesar imagen
+        async function procesarImagen(imagenId) {
+            if (!confirm('¿Iniciar procesamiento de la imagen?')) return;
+
+            try {
+                const response = await fetch(`${API_BASE}/calculos/iniciar`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ imagen_id: imagenId })
+                });
+
+                if (response.ok) {
+                    alert('Procesamiento iniciado');
+                    cargarImagenes();
+                } else {
+                    const error = await response.json();
+                    alert('Error: ' + error.detail);
+                }
+            } catch (error) {
+                alert('Error de conexión');
+            }
+        }
+
+        // Cargar resultados
+        async function cargarResultados() {
+            const volcanId = document.getElementById('resultados-volcan').value;
+            const desde = document.getElementById('resultados-desde').value;
+            const hasta = document.getElementById('resultados-hasta').value;
+            
+            const tbody = document.getElementById('tbody-resultados');
+            tbody.innerHTML = '<tr><td colspan="6" class="loading"><i class="fas fa-spinner fa-spin"></i></td></tr>';
+
+            try {
+                let url = `${API_BASE}/resultados?limite=200`;
+                if (volcanId) url += `&volcan_id=${volcanId}`;
+                if (desde) url += `&fecha_inicio=${desde}T00:00:00`;
+                if (hasta) url += `&fecha_fin=${hasta}T23:59:59`;
+
+                const response = await fetch(url);
+                resultadosData = await response.json();
+
+                if (resultadosData.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="6">No hay resultados</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = resultadosData.map(r => `
+                    <tr>
+                        <td>${new Date(r.fecha_hora).toLocaleString()}</td>
+                        <td>${r.flujo_so2_kg_s?.toFixed(2) || '-'}</td>
+                        <td>${r.flujo_so2_ton_dia?.toFixed(1) || '-'}</td>
+                        <td>${r.velocidad_viento_ms?.toFixed(1) || '-'}</td>
+                        <td>${r.direccion_viento_grados?.toFixed(0) || '-'}°</td>
+                        <td>
+                            <span class="badge ${
+                                r.qa_flag === 0 ? 'badge-success' : 
+                                r.qa_flag === 1 ? 'badge-warning' : 'badge-danger'
+                            }">
+                                ${r.qa_flag === 0 ? 'Bueno' : r.qa_flag === 1 ? 'Aceptable' : 'Malo'}
+                            </span>
+                        </td>
+                    </tr>
+                `).join('');
+            } catch (error) {
+                tbody.innerHTML = '<tr><td colspan="6">Error cargando resultados</td></tr>';
+            }
+        }
+
+        // Exportar a CSV
+        function exportarCSV() {
+            if (resultadosData.length === 0) {
+                alert('No hay datos para exportar');
+                return;
+            }
+
+            const headers = ['Fecha', 'Flujo_kg_s', 'Flujo_ton_dia', 'Viento_ms', 'Direccion', 'QA_Flag'];
+            const rows = resultadosData.map(r => [
+                r.fecha_hora,
+                r.flujo_so2_kg_s,
+                r.flujo_so2_ton_dia,
+                r.velocidad_viento_ms,
+                r.direccion_viento_grados,
+                r.qa_flag
+            ]);
+
+            const csv = [headers, ...rows].map(row => row.join(',')).join('\n');
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'flujo_so2.csv';
+            a.click();
+        }
+
+        // Actualizar gráfico
+        async function actualizarGrafico() {
+            const volcanId = document.getElementById('volcan-chart-select').value;
+            if (!volcanId) return;
+
+            try {
+                const fechaFin = new Date();
+                const fechaInicio = new Date();
+                fechaInicio.setMonth(fechaInicio.getMonth() - 3);
+
+                const response = await fetch(`${API_BASE}/resultados/serie-temporal`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        volcan_id: parseInt(volcanId),
+                        fecha_inicio: fechaInicio.toISOString(),
+                        fecha_fin: fechaFin.toISOString()
+                    })
+                });
+
+                const data = await response.json();
+
+                if (chart) {
+                    chart.destroy();
+                }
+
+                const ctx = document.getElementById('flujoChart').getContext('2d');
+                chart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: data.datos.map(d => new Date(d.fecha_hora).toLocaleDateString()),
+                        datasets: [{
+                            label: 'Flujo SO2 (ton/día)',
+                            data: data.datos.map(d => d.flujo_ton_dia),
+                            borderColor: '#e74c3c',
+                            backgroundColor: 'rgba(231, 76, 60, 0.1)',
+                            fill: true,
+                            tension: 0.3
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: 'Flujo SO2 (ton/día)'
+                                }
+                            }
+                        }
+                    }
+                });
+            } catch (error) {
+                console.error('Error actualizando gráfico:', error);
+            }
+        }
+
+        // Actualizar estadísticas
+        async function actualizarEstadisticas() {
+            document.getElementById('stat-volcanes').textContent = volcanes.length;
+
+            try {
+                const response = await fetch(`${API_BASE}/imagenes?procesado=true&limite=1`);
+                const imagenes = await response.json();
+                
+                // Contar todas las imágenes procesadas
+                const responseAll = await fetch(`${API_BASE}/imagenes?procesado=true&limite=1000`);
+                const todasImagenes = await responseAll.json();
+                document.getElementById('stat-imagenes').textContent = todasImagenes.length;
+
+                // Último flujo
+                const responseResultados = await fetch(`${API_BASE}/resultados?limite=1`);
+                const resultados = await responseResultados.json();
+                
+                if (resultados.length > 0 && resultados[0].flujo_so2_ton_dia) {
+                    document.getElementById('stat-ultimo-flujo').textContent = 
+                        resultados[0].flujo_so2_ton_dia.toFixed(1);
+                }
+            } catch (error) {
+                console.error('Error cargando estadísticas:', error);
+            }
+        }
+
+        // Establecer fechas por defecto
+        function setFechasDefault() {
+            const hoy = new Date();
+            const hace7dias = new Date();
+            hace7dias.setDate(hace7dias.getDate() - 7);
+
+            document.getElementById('extraccion-fin').value = hoy.toISOString().split('T')[0];
+            document.getElementById('extraccion-inicio').value = hace7dias.toISOString().split('T')[0];
+        }
+
+        function seleccionarVolcan(id) {
+            // Marcar como seleccionado visualmente
+            document.querySelectorAll('.volcano-item').forEach(item => {
+                item.classList.remove('selected');
+            });
+            event.currentTarget.classList.add('selected');
+        }
+    </script>
+</body>
+</html>

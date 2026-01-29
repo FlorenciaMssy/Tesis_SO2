@@ -1,0 +1,26 @@
+# Dockerfile para Jupyter Notebook
+FROM jupyter/scipy-notebook:latest
+
+USER root
+
+# Instalar dependencias adicionales del sistema
+RUN apt-get update && apt-get install -y \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+USER ${NB_UID}
+
+# Copiar requirements e instalar
+COPY requirements.txt /tmp/
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
+
+# Copiar código del proyecto
+COPY --chown=${NB_UID}:${NB_GID} . /home/jovyan/work/
+
+WORKDIR /home/jovyan/notebooks
+
+# Exponer puerto
+EXPOSE 8888
+
+# Comando de inicio
+CMD ["start-notebook.sh", "--NotebookApp.token=''", "--NotebookApp.password=''"]
