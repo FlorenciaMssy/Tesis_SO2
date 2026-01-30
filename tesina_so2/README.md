@@ -270,4 +270,4 @@ Donde:
 
 ## 📄 Licencia
 
-Este proyecto fue desarrollado como trabajo de tesina para la carrera de Ingeniería en Informática.
+Este proyecto fue desarrollado como trabajo de tesina para la carrera de Licenciatura en Informática.
