@@ -17,6 +17,30 @@ from etl.tropomi_processor import TROPOMIProcessor
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+import numpy as np
+from datetime import datetime
+
+def to_json_safe(obj):
+    if obj is None:
+        return None
+
+    if isinstance(obj, (np.integer,)):
+        return int(obj)
+    if isinstance(obj, (np.floating,)):
+        return float(obj)
+    if isinstance(obj, (np.bool_,)):
+        return bool(obj)
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+
+    if isinstance(obj, dict):
+        return {str(k): to_json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [to_json_safe(x) for x in obj]
+
+    return obj
 
 class CalculadorFlujoSO2:
     """
@@ -219,7 +243,7 @@ class CalculadorFlujoSO2:
             
         finally:
             processor.cerrar()
-    
+
     def guardar_resultado(
         self,
         volcan_id: int,
@@ -277,7 +301,7 @@ class CalculadorFlujoSO2:
                 azimut_pluma_grados=pluma.get('azimut'),
                 incertidumbre_pct=incertidumbre,
                 qa_flag=qa_flag,
-                metadatos_json=resultado
+                metadatos_json=to_json_safe(resultado)
             )
             
             self.session.add(registro)

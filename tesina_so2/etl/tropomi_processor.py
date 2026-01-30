@@ -331,7 +331,7 @@ class TROPOMIProcessor:
         # Integral usando regla del trapecio
         so2_validos = so2_seccion[~np.isnan(so2_seccion)]
         if len(so2_validos) > 1:
-            integral_so2 = np.trapz(so2_validos) * dx_m  # mol/m² * m = mol/m
+            integral_so2 = np.trapezoid(so2_validos) * dx_m  # mol/m² * m = mol/m
         else:
             integral_so2 = 0
         

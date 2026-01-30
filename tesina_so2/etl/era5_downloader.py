@@ -3,6 +3,7 @@ Módulo ETL para descarga de datos de viento desde ERA5
 Utiliza la API de CDS (Climate Data Store) de Copernicus
 """
 import os
+import pandas as pd
 import cdsapi
 import numpy as np
 import xarray as xr
@@ -214,25 +215,34 @@ class ERA5Downloader:
             ds = xr.open_dataset(ruta_archivo)
             
             # Seleccionar el punto más cercano
-            # ERA5 usa 'latitude' y 'longitude'
+            # ERA5 nuevo formato usa 'latitude', 'longitude', 'valid_time', 'pressure_level'
             punto = ds.sel(latitude=lat, longitude=lon, method='nearest')
             
-            # Extraer componentes
-            u = float(punto['u'].values)
-            v = float(punto['v'].values)
-            
-            # Obtener nivel de presión y tiempo
-            if 'level' in punto.dims or 'level' in punto.coords:
-                nivel_presion = float(punto['level'].values)
-            elif 'pressure_level' in punto.coords:
-                nivel_presion = float(punto['pressure_level'].values)
+            # Extraer componentes (pueden ser 'u'/'v' o 'u10'/'v10')
+            if 'u' in punto:
+                u = float(punto['u'].values.flatten()[0])
+                v = float(punto['v'].values.flatten()[0])
+            elif 'u_component_of_wind' in punto:
+                u = float(punto['u_component_of_wind'].values.flatten()[0])
+                v = float(punto['v_component_of_wind'].values.flatten()[0])
             else:
-                nivel_presion = None
+                logger.error(f"Variables de viento no encontradas. Disponibles: {list(ds.variables)}")
+                ds.close()
+                return None
             
-            if 'time' in punto.coords:
-                tiempo = punto['time'].values
-                if hasattr(tiempo, 'astype'):
-                    tiempo = tiempo.astype('datetime64[s]').astype(datetime)
+            # Obtener nivel de presión
+            if 'pressure_level' in punto.coords:
+                nivel_presion = float(punto['pressure_level'].values.flatten()[0])
+            elif 'level' in punto.coords:
+                nivel_presion = float(punto['level'].values.flatten()[0])
+            else:
+                nivel_presion = 700  # Default
+            
+            # Obtener tiempo
+            if 'valid_time' in punto.coords:
+                tiempo = pd.to_datetime(punto['valid_time'].values.flatten()[0])
+            elif 'time' in punto.coords:
+                tiempo = pd.to_datetime(punto['time'].values.flatten()[0])
             else:
                 tiempo = None
             
@@ -258,6 +268,8 @@ class ERA5Downloader:
             
         except Exception as e:
             logger.error(f"Error extrayendo datos de viento: {e}")
+            import traceback
+            traceback.print_exc()
             return None
     
     def guardar_datos_viento(
