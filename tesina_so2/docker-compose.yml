@@ -71,7 +71,6 @@ services:
     networks:
       - so2_network
 
-  # Worker de Cálculos
   worker_calculos:
     build:
       context: .
@@ -95,6 +94,10 @@ services:
       rabbitmq:
         condition: service_healthy
     volumes:
+      - ./data:/app/data
+      - ./.cdsapirc:/root/.cdsapirc:ro
+      - ./calculador:/app/calculador
+      - ./etl:/app/etl
       - ./data:/app/data
       - ./.cdsapirc:/root/.cdsapirc:ro
     networks:

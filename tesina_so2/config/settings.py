@@ -71,3 +71,50 @@ DEFAULT_ALTITUDE_M = 3000  # Altitud por defecto para extracción de viento (met
 
 # Niveles de presión ERA5 (hPa) para extracción de viento
 PRESSURE_LEVELS = [1000, 925, 850, 700, 500, 300, 200, 100]
+
+# Franjas horarias para el cálculo de flujo (horas desde el volcán)
+SO2FC_FRANJAS_HORAS = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0]
+
+# Tolerancia para selección de píxeles en cada franja (±horas)
+SO2FC_TOLERANCIA_HORA = 0.1
+
+# Tolerancia para el azimut de la pluma (grados)
+SO2FC_TOLERANCIA_AZIMUT = 30
+
+# Distancia de referencia para detectar azimut de pluma (metros)
+SO2FC_DISTANCIA_REFERENCIA = 60000  # 60 km
+
+# Conversiones de unidades (del código MATLAB)
+# mol/m² a g/m²: dividir por 0.0156 (masa molar / factor)
+# g/m² a kg/m²: multiplicar por 0.001
+MOLM2_TO_GM2_FACTOR = 1 / 0.0156  # ≈ 64.1
+GM2_TO_KGM2_FACTOR = 0.001
+
+# kg/s a ton/día: multiplicar por 86.4
+KGS_TO_TD_FACTOR = 86.4  # 86400 s/día ÷ 1000 kg/ton
+
+# Alturas por nivel de presión (metros) - Del código MATLAB
+PRESSURE_TO_HEIGHT = {
+    1000: 111,
+    975: 323,
+    950: 540,
+    925: 762,
+    900: 988,
+    850: 1458,
+    800: 1948,
+    750: 2465,
+    700: 3013,
+    650: 3589,
+    600: 4204,
+    550: 4863,
+    500: 5576,
+    450: 6341,
+    400: 7187,
+    350: 8113,
+    300: 9166,
+    250: 10366,
+    200: 11787
+}
+
+# URL NCEP Reanalysis (para vientos, sin autenticación)
+NCEP_BASE_URL = "https://psl.noaa.gov/thredds/dodsC/Datasets/ncep.reanalysis"
