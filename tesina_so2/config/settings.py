@@ -72,6 +72,10 @@ DEFAULT_ALTITUDE_M = 3000  # Altitud por defecto para extracción de viento (met
 # Niveles de presión ERA5 (hPa) para extracción de viento
 PRESSURE_LEVELS = [1000, 925, 850, 700, 500, 300, 200, 100]
 
+# ============================================================
+# MÉTODO SO2FC (Carbajal et al. - SEGEMAR/OAVV)
+# ============================================================
+
 # Franjas horarias para el cálculo de flujo (horas desde el volcán)
 SO2FC_FRANJAS_HORAS = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0]
 
@@ -83,6 +87,11 @@ SO2FC_TOLERANCIA_AZIMUT = 30
 
 # Distancia de referencia para detectar azimut de pluma (metros)
 SO2FC_DISTANCIA_REFERENCIA = 60000  # 60 km
+
+# Radio máximo de búsqueda (AOI - Area of Interest)
+# Similar al clip(AOI) de Google Earth Engine
+# Debe cubrir al menos 3h de viaje con vientos fuertes (~30 m/s = 324 km)
+SO2FC_RADIO_MAXIMO_KM = 400  # km
 
 # Conversiones de unidades (del código MATLAB)
 # mol/m² a g/m²: dividir por 0.0156 (masa molar / factor)

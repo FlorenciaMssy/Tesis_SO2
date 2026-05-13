@@ -1,35 +1,17 @@
-from .tropomi_downloader import (
-    TROPOMIDownloader,
-    buscar_y_descargar_tropomi
+from .gee_tropomi_downloader import (
+    GEETROPOMIDownloader,
+    descargar_tropomi_gee
 )
-from .tropomi_processor import (
-    TROPOMIProcessor,
-    procesar_imagen_tropomi
-)
-# NCEP Reanalysis para vientos (reemplaza ERA5)
+from .geotiff_processor import GeoTIFFProcessor
 from .ncep_downloader import (
-    NCEPDownloader,
+    ERA5Downloader,
     obtener_viento_para_imagen
 )
 
-# Mantener ERA5 por compatibilidad (deprecated)
-try:
-    from .era5_downloader import (
-        ERA5Downloader,
-        obtener_perfil_vertical_viento
-    )
-except ImportError:
-    ERA5Downloader = None
-    obtener_perfil_vertical_viento = None
-
 __all__ = [
-    'TROPOMIDownloader',
-    'buscar_y_descargar_tropomi',
-    'NCEPDownloader',
-    'obtener_viento_para_imagen',
-    'TROPOMIProcessor',
-    'procesar_imagen_tropomi',
-    # Deprecated
+    'GEETROPOMIDownloader',
+    'descargar_tropomi_gee',
+    'GeoTIFFProcessor',
     'ERA5Downloader',
-    'obtener_perfil_vertical_viento',
+    'obtener_viento_para_imagen',
 ]

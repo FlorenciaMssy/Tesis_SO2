@@ -1,5 +1,11 @@
 """
-Procesador de imágenes TROPOMI de SO2
+Procesador de imágenes TROPOMI de SO2 - Método SO2FC
+Basado en el código MATLAB de Carbajal et al. (SEGEMAR/OAVV)
+
+CORRECCIÓN IMPORTANTE:
+La detección de pluma ahora puede ser guiada por la dirección del viento
+para evitar detectar SO2 de otras fuentes.
+
 El método calcula el flujo en 6 franjas horarias (0.5h, 1h, 1.5h, 2h, 2.5h, 3h)
 desde el punto de emisión, usando la fórmula:
 
@@ -17,7 +23,7 @@ import warnings
 from config.settings import (
     SO2FC_FRANJAS_HORAS, SO2FC_TOLERANCIA_HORA, SO2FC_TOLERANCIA_AZIMUT,
     SO2FC_DISTANCIA_REFERENCIA, MOLM2_TO_GM2_FACTOR, GM2_TO_KGM2_FACTOR,
-    KGS_TO_TD_FACTOR
+    KGS_TO_TD_FACTOR, SO2FC_RADIO_MAXIMO_KM
 )
 
 warnings.filterwarnings('ignore')
@@ -29,6 +35,7 @@ logger = logging.getLogger(__name__)
 class TROPOMIProcessor:
     """
     Procesador de imágenes TROPOMI de SO2
+    Compatible con el método SO2FC de MATLAB
     """
     
     # Radio de la Tierra en metros
@@ -190,9 +197,10 @@ class TROPOMIProcessor:
         lon_centro: float
     ) -> np.ndarray:
         """
-        Calcula el azimut desde el punto de emisión a cada píxel
+        Calcula el azimut geográfico desde el punto de emisión a cada píxel
         
-        Azimut: 0° = Norte, 90° = Este, 180° = Sur, 270° = Oeste
+        Azimut GEOGRÁFICO: 0° = Norte, 90° = Este, 180° = Sur, 270° = Oeste
+        (Igual que la función azimuth() de MATLAB)
         """
         if self.lat is None or self.lon is None:
             return None
@@ -201,7 +209,8 @@ class TROPOMIProcessor:
         dlat = self.lat - lat_centro
         dlon = self.lon - lon_centro
         
-        # Azimut geográfico
+        # Calcular azimut geográfico (como MATLAB azimuth())
+        # azimut = atan2(dlon, dlat) convertido a 0-360
         azimut = np.degrees(np.arctan2(dlon, dlat))
         
         # Normalizar a 0-360
@@ -213,15 +222,27 @@ class TROPOMIProcessor:
         self,
         lat_volcan: float,
         lon_volcan: float,
-        distancia_referencia_m: float = None
+        distancia_referencia_m: float = None,
+        azimut_viento: float = None,
+        tolerancia_viento: float = 60
     ) -> Optional[float]:
         """
-        Detecta automáticamente el azimut de la pluma
+        Detecta automáticamente el azimut de la pluma.
         
-        Método del código MATLAB:
-        1. Buscar píxeles a ~60km del volcán
-        2. Encontrar el máximo de SO2 en esa franja
-        3. El azimut de ese píxel es el azimut de la pluma
+        MÉTODO MEJORADO:
+        1. Si se proporciona azimut_viento, busca el máximo de SO2 en esa dirección
+           (la pluma DEBE ir en la dirección del viento)
+        2. Si no hay azimut_viento, busca el máximo global a ~60km (método original)
+        
+        Args:
+            lat_volcan: Latitud del volcán
+            lon_volcan: Longitud del volcán
+            distancia_referencia_m: Distancia de referencia (default 60km)
+            azimut_viento: Dirección hacia donde va el viento (GEOGRÁFICO, 0=N, 90=E)
+            tolerancia_viento: Tolerancia en grados alrededor del azimut del viento
+        
+        Returns:
+            Azimut de la pluma en grados geográficos (0-360)
         """
         if distancia_referencia_m is None:
             distancia_referencia_m = SO2FC_DISTANCIA_REFERENCIA
@@ -237,18 +258,32 @@ class TROPOMIProcessor:
         so2_molm2, _ = self.filtrar_por_calidad()
         
         # Buscar píxeles a ~60km (±2.5km como en MATLAB)
-        tolerancia = 2500  # metros
+        tolerancia_dist = 2500  # metros
         
         for dist_ref in [distancia_referencia_m, 40000, 30000, 20000, 10000]:
-            mascara_distancia = (np.abs(distancias - dist_ref) < tolerancia)
-            so2_selec = np.where(mascara_distancia, so2_molm2, 0)
+            mascara_distancia = (np.abs(distancias - dist_ref) < tolerancia_dist)
+            
+            # Si hay azimut de viento, filtrar también por dirección
+            if azimut_viento is not None:
+                # La pluma debe estar en la dirección del viento
+                dif_azimut = np.abs(azimuts - azimut_viento)
+                dif_azimut = np.where(dif_azimut > 180, 360 - dif_azimut, dif_azimut)
+                mascara_direccion = dif_azimut <= tolerancia_viento
+                
+                mascara_final = mascara_distancia & mascara_direccion
+                logger.info(f"Buscando pluma a {dist_ref/1000:.0f}km en dirección ~{azimut_viento:.0f}° (±{tolerancia_viento}°)")
+            else:
+                mascara_final = mascara_distancia
+                logger.info(f"Buscando pluma a {dist_ref/1000:.0f}km (cualquier dirección)")
+            
+            so2_selec = np.where(mascara_final, so2_molm2, 0)
             max_so2 = np.nanmax(so2_selec)
             
             if max_so2 > 0 and not np.isnan(max_so2):
-                logger.info(f"Pluma detectada a {dist_ref/1000:.0f}km")
+                logger.info(f"Pluma detectada a {dist_ref/1000:.0f}km, SO2_max={max_so2:.2e} mol/m²")
                 break
         else:
-            logger.warning("No se detectó pluma en ninguna distancia")
+            logger.warning("No se detectó pluma de SO2")
             return None
         
         # Encontrar ubicación del máximo
@@ -309,19 +344,25 @@ class TROPOMIProcessor:
         velocidad_viento_ms: float,
         azimut_pluma: float,
         horas: List[float] = None,
-        tolerancia_azimut: float = None
+        tolerancia_azimut: float = None,
+        radio_maximo_km: float = None
     ) -> Dict:
         """
-        Calcula el SO2 para cada franja horaria
+        Calcula el SO2 para cada franja horaria (método SO2FC)
         
         Franjas por defecto: 0.5h, 1h, 1.5h, 2h, 2.5h, 3h
         
         Fórmula: Flujo (kg/s) = SO2_max (kg/m²) × distancia (m) × velocidad (m/s)
+        
+        IMPORTANTE: Se aplica un radio máximo de búsqueda (AOI - Area of Interest)
+        similar al clip(AOI) de Google Earth Engine.
         """
         if horas is None:
             horas = SO2FC_FRANJAS_HORAS
         if tolerancia_azimut is None:
             tolerancia_azimut = SO2FC_TOLERANCIA_AZIMUT
+        if radio_maximo_km is None:
+            radio_maximo_km = SO2FC_RADIO_MAXIMO_KM
         
         # Calcular distancias y azimuts
         distancia_m = self.calcular_distancia_metros(lat_volcan, lon_volcan)
@@ -330,8 +371,22 @@ class TROPOMIProcessor:
         if distancia_m is None or azimuts is None:
             return {'exito': False, 'mensaje': 'No se pudieron calcular distancias'}
         
+        # Aplicar radio máximo (AOI)
+        radio_maximo_m = radio_maximo_km * 1000
+        mascara_aoi = distancia_m <= radio_maximo_m
+        
+        pixeles_en_aoi = np.sum(mascara_aoi)
+        logger.info(f"AOI: {pixeles_en_aoi} píxeles dentro de {radio_maximo_km}km del volcán")
+        
+        if pixeles_en_aoi == 0:
+            return {'exito': False, 'mensaje': f'No hay datos dentro de {radio_maximo_km}km del volcán'}
+        
         # Filtrar por calidad
         so2_molm2, so2_kgm2 = self.filtrar_por_calidad()
+        
+        # Aplicar máscara AOI
+        so2_molm2 = np.where(mascara_aoi, so2_molm2, np.nan)
+        so2_kgm2 = np.where(mascara_aoi, so2_kgm2, np.nan)
         
         # Calcular distancia temporal
         distancia_h = self.calcular_distancia_temporal(distancia_m, velocidad_viento_ms)
@@ -341,8 +396,9 @@ class TROPOMIProcessor:
             azimuts, azimut_pluma, tolerancia_azimut
         )
         
-        # Aplicar máscara de pluma
-        distancia_h_pluma = np.where(mascara_pluma, distancia_h, np.nan)
+        # Aplicar ambas máscaras
+        mascara_combinada = mascara_pluma & mascara_aoi
+        distancia_h_pluma = np.where(mascara_combinada, distancia_h, np.nan)
         
         resultados_franjas = []
         
@@ -366,7 +422,6 @@ class TROPOMIProcessor:
                 dist_m_max = distancia_m[idx_max]
                 
                 # Calcular flujo: SO2_kg/m² × distancia_m × velocidad_m/s
-                # (Fórmula del código MATLAB línea 652)
                 flujo_kgs = max_so2_kgm2 * dist_m_max * velocidad_viento_ms
                 
                 resultados_franjas.append({
@@ -391,13 +446,12 @@ class TROPOMIProcessor:
                 })
                 logger.info(f"Franja {hora}h: Sin datos")
         
-        # Calcular promedios (ignorando None)
+        # Calcular promedios
         flujos_validos = [r['flujo_kgs'] for r in resultados_franjas if r['flujo_kgs'] is not None]
         so2_validos = [r['so2_molm2'] for r in resultados_franjas if r['so2_molm2'] is not None]
         
         if flujos_validos:
             flujo_promedio_kgs = np.mean(flujos_validos)
-            # Convertir a ton/día: kg/s × 86.4 (como en MATLAB línea 761)
             flujo_promedio_td = flujo_promedio_kgs * KGS_TO_TD_FACTOR
             so2_total = np.sum(so2_validos)
             
@@ -423,12 +477,16 @@ class TROPOMIProcessor:
         lat_volcan: float,
         lon_volcan: float,
         umbral_so2: float = 0.001,
-        radio_busqueda_km: float = 100
+        radio_busqueda_km: float = 100,
+        azimut_viento: float = None
     ) -> Optional[Dict]:
         """
         Función de compatibilidad: detecta pluma
         """
-        azimut = self.detectar_azimut_pluma(lat_volcan, lon_volcan)
+        azimut = self.detectar_azimut_pluma(
+            lat_volcan, lon_volcan,
+            azimut_viento=azimut_viento
+        )
         
         if azimut is None:
             return None
@@ -451,10 +509,7 @@ class TROPOMIProcessor:
             self.dataset.close()
 
 
-# ============================================================
-# FUNCIONES DE COMPATIBILIDAD CON CÓDIGO ANTERIOR
-# ============================================================
-
+# Función de compatibilidad
 def procesar_imagen_tropomi(
     ruta_archivo: str,
     lat_volcan: float,
@@ -467,13 +522,8 @@ def procesar_imagen_tropomi(
     processor = TROPOMIProcessor(ruta_archivo)
     
     try:
-        # Filtrar por calidad
         so2_molm2, so2_kgm2 = processor.filtrar_por_calidad(qa_threshold)
-        
-        # Detectar pluma
         azimut = processor.detectar_azimut_pluma(lat_volcan, lon_volcan)
-        
-        # Estadísticas básicas
         valid = so2_molm2[~np.isnan(so2_molm2)]
         
         return {
@@ -500,10 +550,10 @@ def procesar_imagen_tropomi(
 
 
 if __name__ == "__main__":
-    print("Procesador TROPOMI")
+    print("Procesador TROPOMI - Método SO2FC")
     print("=" * 50)
     print("\nEste módulo implementa el método de distancia/tiempo")
-    print("para calcular flujo de SO2")
+    print("de Carbajal et al. (SO2FC) para calcular flujo de SO2")
     print(f"\nFranjas horarias: {SO2FC_FRANJAS_HORAS}")
     print(f"Tolerancia hora: ±{SO2FC_TOLERANCIA_HORA}h")
     print(f"Tolerancia azimut: ±{SO2FC_TOLERANCIA_AZIMUT}°")

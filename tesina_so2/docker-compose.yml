@@ -68,6 +68,8 @@ services:
         condition: service_healthy
     volumes:
       - ./data:/app/data
+      # Credenciales de Google Earth Engine
+      - C:/Users/julia/.config/earthengine:/root/.config/earthengine:ro
     networks:
       - so2_network
 
@@ -98,8 +100,8 @@ services:
       - ./.cdsapirc:/root/.cdsapirc:ro
       - ./calculador:/app/calculador
       - ./etl:/app/etl
-      - ./data:/app/data
-      - ./.cdsapirc:/root/.cdsapirc:ro
+      # Credenciales de Google Earth Engine
+      - C:/Users/julia/.config/earthengine:/root/.config/earthengine:ro
     networks:
       - so2_network
 
@@ -129,6 +131,8 @@ services:
         condition: service_healthy
     volumes:
       - ./data:/app/data
+      # Credenciales de Google Earth Engine
+      - C:/Users/julia/.config/earthengine:/root/.config/earthengine:ro
     networks:
       - so2_network
 
@@ -163,6 +167,8 @@ services:
     volumes:
       - ./notebooks:/home/jovyan/notebooks
       - ./data:/home/jovyan/data
+      # Credenciales de Google Earth Engine
+      - C:/Users/julia/.config/earthengine:/root/.config/earthengine:ro
     depends_on:
       postgres:
         condition: service_healthy

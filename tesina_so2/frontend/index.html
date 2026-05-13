@@ -3,59 +3,81 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SO2FC - Monitor de Flujo SO2 Volcánico</title>
+    <title>SO2 Monitor - Flujo SO2 Volcánico</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        :root {
-            --primary: #2c3e50;
-            --secondary: #3498db;
-            --success: #27ae60;
-            --warning: #f39c12;
-            --danger: #e74c3c;
-        }
+        :root { --primary: #2c3e50; --secondary: #3498db; --success: #27ae60; --warning: #f39c12; --danger: #e74c3c; --gee: #8e44ad; }
         body { background: #f5f6fa; font-family: 'Segoe UI', sans-serif; }
         .navbar { background: linear-gradient(135deg, var(--primary), #1a252f); }
         .card { border: none; border-radius: 10px; box-shadow: 0 2px 15px rgba(0,0,0,0.08); margin-bottom: 20px; }
         .card-header { background: linear-gradient(135deg, var(--primary), #34495e); color: white; border-radius: 10px 10px 0 0 !important; font-weight: 600; }
+        .card-header.gee-header { background: linear-gradient(135deg, var(--gee), #6c3483); }
         .nav-tabs .nav-link.active { background: var(--secondary); color: white; border: none; }
         .nav-tabs .nav-link { color: var(--primary); }
         #map { height: 350px; border-radius: 10px; }
         .stat-value { font-size: 1.8rem; font-weight: bold; color: var(--secondary); }
         .stat-label { color: #7f8c8d; font-size: 0.85rem; }
-        .badge-bueno { background: var(--success); }
-        .badge-aceptable { background: var(--warning); }
-        .badge-malo { background: var(--danger); }
         .expandable-row { cursor: pointer; }
         .expandable-row:hover { background: #f0f7ff; }
         .detail-row { display: none; background: #fafafa; }
         .detail-row.show { display: table-row; }
         .franja-table { font-size: 0.8rem; }
-        .franja-table th { background: #ecf0f1; font-weight: 600; }
         .franja-header { background: #3498db !important; color: white !important; }
         .btn-procesar { background: linear-gradient(135deg, var(--success), #1e8449); border: none; }
+        .btn-gee { background: linear-gradient(135deg, var(--gee), #6c3483); border: none; color: white; }
+        .btn-gee:hover { background: linear-gradient(135deg, #6c3483, var(--gee)); color: white; }
         .metodo-info { background: #e8f6f3; border-left: 4px solid var(--success); padding: 15px; border-radius: 5px; }
+        .toast-container { position: fixed; bottom: 20px; right: 20px; z-index: 9999; }
+        .gee-status { padding: 10px; border-radius: 5px; margin-bottom: 15px; }
+        .gee-status.ok { background: #d4edda; border: 1px solid #c3e6cb; }
+        .gee-status.error { background: #f8d7da; border: 1px solid #f5c6cb; }
+        .resultado-con-imagen { display: grid; grid-template-columns: 1fr 420px; gap: 20px; }
+        @media (max-width: 1200px) { .resultado-con-imagen { grid-template-columns: 1fr; } }
+        .resultado-row:hover { background: #e8f4fc; cursor: pointer; }
+        .info-panel { background: linear-gradient(135deg, #1a1a2e, #16213e); border-radius: 10px; padding: 20px; color: white; min-height: 300px; }
+        .info-panel h4 { color: #00d9ff; margin-bottom: 15px; }
+        .info-panel .valor-grande { font-size: 2.5rem; font-weight: bold; color: #00ff88; }
+        .info-panel .label { color: #aaa; font-size: 0.85rem; }
+        .info-panel .dato { color: white; font-size: 1rem; margin-bottom: 8px; }
+        .franjas-mini { display: flex; gap: 5px; margin-top: 10px; }
+        .franja-box { flex: 1; text-align: center; padding: 5px; border-radius: 5px; font-size: 0.7rem; }
+        .franja-box.activa { background: #27ae60; color: white; }
+        .franja-box.inactiva { background: #333; color: #666; }
+        .fuente-tag { display: inline-block; background: var(--gee); color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; }
     </style>
 </head>
 <body>
     <nav class="navbar navbar-dark mb-4">
         <div class="container">
-            <span class="navbar-brand"><i class="bi bi-cloud-haze2"></i> Flujo SO2 Volcánico</span>
+            <span class="navbar-brand"><i class="bi bi-cloud-haze2"></i> Monitor de Flujo SO2 Volcánico</span>
+            <span class="badge bg-light text-dark" id="geeStatusBadge">GEE: verificando...</span>
         </div>
     </nav>
 
+    <div class="toast-container">
+        <div id="toastNotification" class="toast" role="alert">
+            <div class="toast-header">
+                <i class="bi bi-info-circle me-2" id="toastIcon"></i>
+                <strong class="me-auto" id="toastTitle">Info</strong>
+                <button type="button" class="btn-close" data-bs-dismiss="toast"></button>
+            </div>
+            <div class="toast-body" id="toastMessage"></div>
+        </div>
+    </div>
+
     <div class="container-fluid px-4">
         <ul class="nav nav-tabs mb-4">
+            <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#volcanes"><i class="bi bi-geo-alt"></i> Volcanes</a></li>
             <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#dashboard"><i class="bi bi-speedometer2"></i> Dashboard</a></li>
             <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#extraccion"><i class="bi bi-cloud-download"></i> Extracción</a></li>
             <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#resultados"><i class="bi bi-table"></i> Resultados</a></li>
-            <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#volcanes"><i class="bi bi-geo-alt"></i> Volcanes</a></li>
-        </ul>
+        </ul>    
 
         <div class="tab-content">
-            <!-- ==================== DASHBOARD ==================== -->
+            <!-- DASHBOARD -->
             <div class="tab-pane fade show active" id="dashboard">
                 <div class="row">
                     <div class="col-md-8">
@@ -64,7 +86,10 @@
                             <div class="card-body p-0"><div id="map"></div></div>
                         </div>
                         <div class="card">
-                            <div class="card-header"><i class="bi bi-graph-up"></i> Serie Temporal de Flujo SO2</div>
+                            <div class="card-header">
+                                <i class="bi bi-graph-up"></i> Serie Temporal
+                                <select class="form-select form-select-sm d-inline-block w-auto ms-2" id="volcanDashboard"></select>
+                            </div>
                             <div class="card-body"><canvas id="chartDashboard" height="120"></canvas></div>
                         </div>
                     </div>
@@ -81,13 +106,13 @@
                             </div>
                         </div>
                         <div class="card">
-                            <div class="card-header"><i class="bi bi-info-circle"></i> Método SO2</div>
+                            <div class="card-header"><i class="bi bi-info-circle"></i> Método SO2FC</div>
                             <div class="card-body">
                                 <div class="metodo-info small">
-                                    <p class="mb-2"><strong>Franjas horarias:</strong> 0.5, 1, 1.5, 2, 2.5, 3 h</p>
-                                    <p class="mb-2"><strong>Fórmula:</strong><br><code>Flujo = SO2 × dist × vel</code></p>
-                                    <p class="mb-2"><strong>Conversión:</strong><br>mol/m² → kg/m² (/0.0156 × 0.001)</p>
-                                    <p class="mb-0"><strong>Fuentes:</strong><br>TROPOMI (Sentinel-5P) + NCEP Reanalysis</p>
+                                    <p class="mb-2"><strong>Datos:</strong> TROPOMI L3 (GEE) - 1km</p>
+                                    <p class="mb-2"><strong>Franjas:</strong> 0.5, 1, 1.5, 2, 2.5, 3 h</p>
+                                    <p class="mb-2"><strong>Fórmula:</strong> <code>Flujo = SO2<sub>max</sub> × dist × vel</code></p>
+                                    <p class="mb-0"><strong>Viento:</strong> NCEP Reanalysis</p>
                                 </div>
                             </div>
                         </div>
@@ -95,13 +120,19 @@
                 </div>
             </div>
 
-            <!-- ==================== EXTRACCIÓN ==================== -->
+            <!-- EXTRACCIÓN -->
             <div class="tab-pane fade" id="extraccion">
                 <div class="row">
                     <div class="col-md-4">
                         <div class="card">
-                            <div class="card-header"><i class="bi bi-search"></i> Nueva Extracción</div>
+                            <div class="card-header gee-header"><i class="bi bi-cloud-download"></i> Nueva Extracción</div>
                             <div class="card-body">
+                                <div class="gee-status" id="geeStatusBox"><i class="bi bi-hourglass-split"></i> Verificando GEE...</div>
+                                
+                                <div class="mb-3 p-2 rounded" style="background: #f3e5f5; border: 1px solid #ce93d8;">
+                                    <small class="text-muted"><i class="bi bi-cloud"></i> Fuente: <strong>Google Earth Engine</strong> — TROPOMI L3, 1km</small>
+                                </div>
+                                
                                 <form id="formExtraccion">
                                     <div class="mb-3">
                                         <label class="form-label">Volcán</label>
@@ -115,15 +146,17 @@
                                         <label class="form-label">Fecha Fin</label>
                                         <input type="date" class="form-control" id="fechaFin" required>
                                     </div>
-                                    <button type="submit" class="btn btn-primary w-100 mb-3">
-                                        <i class="bi bi-cloud-download"></i> Buscar Imágenes TROPOMI
+                                    <button type="submit" class="btn btn-gee w-100 mb-3" id="btnIniciarExtraccion">
+                                        <i class="bi bi-cloud-download"></i> Descargar desde GEE
                                     </button>
                                 </form>
                                 <hr>
-                                <button class="btn btn-procesar w-100 text-white" id="btnProcesarTodas">
-                                    <i class="bi bi-play-fill"></i> Procesar Todas las Pendientes
+                                <button class="btn btn-procesar w-100 text-white mb-2" id="btnProcesarTodas">
+                                    <i class="bi bi-play-fill"></i> Procesar Pendientes
                                 </button>
-                                <small class="text-muted d-block mt-2">Procesa todas las imágenes descargadas</small>
+                                <button class="btn btn-outline-danger w-100" id="btnBorrarImagenes">
+                                    <i class="bi bi-trash"></i> Borrar Seleccionadas
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -134,142 +167,98 @@
                                 <select class="form-select form-select-sm d-inline-block w-auto ms-2" id="filtroVolcanImg"></select>
                                 <span class="badge bg-secondary ms-2" id="contadorImg">0</span>
                             </div>
-                            <div class="card-body">
-                                <div class="table-responsive">
-                                    <table class="table table-hover table-sm" id="tablaImagenes">
-                                        <thead>
-                                            <tr>
-                                                <th>ID</th>
-                                                <th>Fecha</th>
-                                                <th>Volcán</th>
-                                                <th>Descargado</th>
-                                                <th>Procesado</th>
-                                                <th>Acciones</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody></tbody>
-                                    </table>
-                                </div>
+                            <div class="card-body" style="max-height: 500px; overflow-y: auto;">
+                                <table class="table table-hover table-sm" id="tablaImagenes">
+                                    <thead><tr><th><input type="checkbox" id="checkAllImg"></th><th>ID</th><th>Fecha</th><th>Volcán</th><th>Estado</th><th></th></tr></thead>
+                                    <tbody></tbody>
+                                </table>
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <!-- ==================== RESULTADOS ==================== -->
+            <!-- RESULTADOS -->
             <div class="tab-pane fade" id="resultados">
                 <div class="card">
                     <div class="card-header">
                         <i class="bi bi-table"></i> Resultados de Flujo SO2
                         <div class="btn-group btn-group-sm float-end">
-                            <button class="btn btn-light active" id="btnVistaDiaria"><i class="bi bi-calendar-day"></i> Por Día</button>
-                            <button class="btn btn-outline-light" id="btnVistaDetalle"><i class="bi bi-list-columns"></i> Detalle Franjas</button>
+                            <button class="btn btn-light active" id="btnVistaDiaria"><i class="bi bi-calendar-day"></i> Día</button>
+                            <button class="btn btn-outline-light" id="btnVistaDetalle"><i class="bi bi-list-columns"></i> Detalle</button>
                         </div>
                     </div>
                     <div class="card-body">
-                        <!-- Filtros -->
                         <div class="row mb-3 g-2">
-                            <div class="col-md-3">
-                                <select class="form-select" id="volcanResultados"></select>
-                            </div>
-                            <div class="col-md-2">
-                                <input type="date" class="form-control" id="fechaDesde" placeholder="Desde">
-                            </div>
-                            <div class="col-md-2">
-                                <input type="date" class="form-control" id="fechaHasta" placeholder="Hasta">
-                            </div>
-                            <div class="col-md-4">
+                            <div class="col-md-3"><select class="form-select" id="volcanResultados"></select></div>
+                            <div class="col-md-2"><input type="date" class="form-control" id="fechaDesde"></div>
+                            <div class="col-md-2"><input type="date" class="form-control" id="fechaHasta"></div>
+                            <div class="col-md-5">
                                 <button class="btn btn-primary" id="btnBuscarResultados"><i class="bi bi-search"></i> Buscar</button>
-                                <button class="btn btn-success" id="btnExportarCSV"><i class="bi bi-file-earmark-spreadsheet"></i> Exportar CSV</button>
+                                <button class="btn btn-success" id="btnExportarCSV"><i class="bi bi-download"></i> CSV</button>
+                                <button class="btn btn-outline-danger" id="btnBorrarResultados"><i class="bi bi-trash"></i> Borrar</button>
                             </div>
                         </div>
-
-                        <!-- VISTA POR DÍA -->
-                        <div id="vistaDiaria">
-                            <table class="table table-hover" id="tablaResultadosDiarios">
-                                <thead>
-                                    <tr>
-                                        <th style="width:30px"></th>
-                                        <th>Fecha</th>
-                                        <th>Volcán</th>
-                                        <th>Flujo SO2 (ton/día)</th>
-                                        <th>± Desv. Est.</th>
-                                        <th>N° Mediciones</th>
-                                        <th>Calidad</th>
-                                    </tr>
-                                </thead>
-                                <tbody></tbody>
-                            </table>
-                        </div>
-
-                        <!-- VISTA DETALLE FRANJAS -->
-                        <div id="vistaDetalle" style="display:none;">
-                            <div class="table-responsive">
-                                <table class="table table-sm franja-table" id="tablaDetalle">
-                                    <thead>
-                                        <tr>
-                                            <th>Fecha</th>
-                                            <th>Hora</th>
-                                            <th>Alt. Viento (m)</th>
-                                            <th>Dir. (°)</th>
-                                            <th>Vel. (m/s)</th>
-                                            <th class="franja-header">F 0.5h</th>
-                                            <th class="franja-header">F 1h</th>
-                                            <th class="franja-header">F 1.5h</th>
-                                            <th class="franja-header">F 2h</th>
-                                            <th class="franja-header">F 2.5h</th>
-                                            <th class="franja-header">F 3h</th>
-                                            <th>Prom (kg/s)</th>
-                                            <th><strong>Total (t/d)</strong></th>
-                                        </tr>
-                                    </thead>
-                                    <tbody></tbody>
-                                </table>
+                        
+                        <div class="resultado-con-imagen">
+                            <div>
+                                <div id="vistaDiaria">
+                                    <table class="table table-hover table-sm" id="tablaResultadosDiarios">
+                                        <thead><tr><th></th><th>Fecha</th><th>Volcán</th><th>Flujo (t/d)</th><th>±</th><th>N</th></tr></thead>
+                                        <tbody></tbody>
+                                    </table>
+                                </div>
+                                <div id="vistaDetalle" style="display:none;">
+                                    <div class="table-responsive">
+                                        <table class="table table-sm franja-table" id="tablaDetalle">
+                                            <thead><tr><th>Fecha</th><th>Hora</th><th>Alt</th><th>Dir</th><th>Vel</th><th class="franja-header">0.5</th><th class="franja-header">1</th><th class="franja-header">1.5</th><th class="franja-header">2</th><th class="franja-header">2.5</th><th class="franja-header">3</th><th>Prom</th><th>Total</th></tr></thead>
+                                            <tbody></tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                                <div id="sinResultados" class="text-center text-muted py-5" style="display:none;">
+                                    <i class="bi bi-inbox" style="font-size:3rem;"></i>
+                                    <p>No hay resultados</p>
+                                </div>
                             </div>
-                        </div>
-
-                        <div id="sinResultados" class="text-center text-muted py-5" style="display:none;">
-                            <i class="bi bi-inbox" style="font-size:3rem;"></i>
-                            <p>No hay resultados. Selecciona un volcán y rango de fechas.</p>
+                            
+                            <div class="info-panel" id="infoPanel">
+                                <h4><i class="bi bi-info-circle"></i> Detalle del Resultado</h4>
+                                <div id="infoPanelContent">
+                                    <p class="text-muted">Click en un resultado para ver detalles</p>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
-
-                <!-- Gráfico -->
                 <div class="card">
                     <div class="card-header"><i class="bi bi-graph-up"></i> Serie Temporal</div>
-                    <div class="card-body"><canvas id="chartResultados" height="100"></canvas></div>
+                    <div class="card-body"><canvas id="chartResultados" height="80"></canvas></div>
                 </div>
             </div>
 
-            <!-- ==================== VOLCANES ==================== -->
+            <!-- VOLCANES -->
             <div class="tab-pane fade" id="volcanes">
                 <div class="row">
                     <div class="col-md-4">
                         <div class="card">
                             <div class="card-header"><i class="bi bi-plus-circle"></i> Agregar Volcán</div>
                             <div class="card-body">
-                                <div class="mb-3">
-                                    <label class="form-label">Predefinidos</label>
-                                    <select class="form-select" id="volcanPredef">
-                                        <option value="">-- Seleccionar --</option>
-                                        <option value="etna">Etna (Italia) - 3357m</option>
-                                        <option value="sabancaya">Sabancaya (Perú) - 5976m</option>
-                                        <option value="copahue">Copahue (Argentina) - 2997m</option>
-                                        <option value="villarrica">Villarrica (Chile) - 2847m</option>
-                                        <option value="popocatepetl">Popocatépetl (México) - 5426m</option>
-                                        <option value="stromboli">Stromboli (Italia) - 926m</option>
-                                    </select>
-                                </div>
-                                <hr>
+                                <select class="form-select mb-3" id="volcanPredef">
+                                    <option value="">-- Predefinidos --</option>
+                                    <option value="sabancaya">Sabancaya (Perú)</option>
+                                    <option value="copahue">Copahue (Argentina)</option>
+                                    <option value="etna">Etna (Italia)</option>
+                                    <option value="villarrica">Villarrica (Chile)</option>
+                                </select>
                                 <form id="formVolcan">
-                                    <div class="mb-2"><input type="text" class="form-control" id="nombreVolcan" placeholder="Nombre" required></div>
-                                    <div class="mb-2"><input type="text" class="form-control" id="paisVolcan" placeholder="País"></div>
+                                    <input type="text" class="form-control mb-2" id="nombreVolcan" placeholder="Nombre" required>
+                                    <input type="text" class="form-control mb-2" id="paisVolcan" placeholder="País">
                                     <div class="row mb-2">
-                                        <div class="col"><input type="number" step="0.001" class="form-control" id="latVolcan" placeholder="Latitud" required></div>
-                                        <div class="col"><input type="number" step="0.001" class="form-control" id="lonVolcan" placeholder="Longitud" required></div>
+                                        <div class="col"><input type="number" step="0.001" class="form-control" id="latVolcan" placeholder="Lat" required></div>
+                                        <div class="col"><input type="number" step="0.001" class="form-control" id="lonVolcan" placeholder="Lon" required></div>
                                     </div>
-                                    <div class="mb-3"><input type="number" class="form-control" id="altVolcan" placeholder="Altitud (m)" required></div>
+                                    <input type="number" class="form-control mb-3" id="altVolcan" placeholder="Altitud (m)" required>
                                     <button type="submit" class="btn btn-primary w-100"><i class="bi bi-plus"></i> Agregar</button>
                                 </form>
                             </div>
@@ -277,10 +266,10 @@
                     </div>
                     <div class="col-md-8">
                         <div class="card">
-                            <div class="card-header"><i class="bi bi-list"></i> Volcanes Registrados</div>
+                            <div class="card-header"><i class="bi bi-list"></i> Volcanes</div>
                             <div class="card-body">
                                 <table class="table table-hover" id="tablaVolcanes">
-                                    <thead><tr><th>ID</th><th>Nombre</th><th>País</th><th>Lat</th><th>Lon</th><th>Altitud</th><th></th></tr></thead>
+                                    <thead><tr><th>ID</th><th>Nombre</th><th>País</th><th>Lat</th><th>Lon</th><th>Alt</th><th></th></tr></thead>
                                     <tbody></tbody>
                                 </table>
                             </div>
@@ -295,50 +284,64 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
         const API = '/api';
-        let map, chartDashboard, chartResultados;
+        let map, chartDashboard, chartResultados, toastEl;
         let volcanes = [], imagenes = [], resultados = [];
+        let markers = {};
 
-        // Volcanes predefinidos
         const PREDEFINIDOS = {
-            etna: {nombre:'Etna', pais:'Italia', lat:37.751, lon:14.993, alt:3357},
             sabancaya: {nombre:'Sabancaya', pais:'Perú', lat:-15.78, lon:-71.85, alt:5976},
             copahue: {nombre:'Copahue', pais:'Argentina', lat:-37.85, lon:-71.17, alt:2997},
-            villarrica: {nombre:'Villarrica', pais:'Chile', lat:-39.42, lon:-71.93, alt:2847},
-            popocatepetl: {nombre:'Popocatépetl', pais:'México', lat:19.02, lon:-98.62, alt:5426},
-            stromboli: {nombre:'Stromboli', pais:'Italia', lat:38.789, lon:15.213, alt:926}
+            etna: {nombre:'Etna', pais:'Italia', lat:37.751, lon:14.993, alt:3357},
+            villarrica: {nombre:'Villarrica', pais:'Chile', lat:-39.42, lon:-71.93, alt:2847}
         };
 
-        // ==================== INIT ====================
         document.addEventListener('DOMContentLoaded', () => {
-            initMap();
-            initCharts();
-            loadAll();
-            setupEvents();
-            setDefaultDates();
+            initToast(); initMap(); initCharts(); loadAll(); setupEvents(); setDefaultDates(); checkGeeStatus();
+            setInterval(loadImagenes, 5000);
         });
 
+        function initToast() { toastEl = new bootstrap.Toast(document.getElementById('toastNotification'), { delay: 3000 }); }
+        
+        function showToast(msg, type='info') {
+            document.getElementById('toastIcon').className = 'bi me-2 ' + (type==='success'?'bi-check-circle text-success':type==='error'?'bi-x-circle text-danger':'bi-info-circle text-info');
+            document.getElementById('toastTitle').textContent = type==='success'?'Éxito':type==='error'?'Error':'Info';
+            document.getElementById('toastMessage').textContent = msg;
+            toastEl.show();
+        }
+
+        async function checkGeeStatus() {
+            const badge = document.getElementById('geeStatusBadge');
+            const box = document.getElementById('geeStatusBox');
+            try {
+                const res = await fetch(`${API}/gee/estado`);
+                const data = await res.json();
+                if(data.estado === 'ok') {
+                    badge.className = 'badge bg-success'; badge.innerHTML = '<i class="bi bi-check-circle"></i> GEE OK';
+                    box.className = 'gee-status ok'; box.innerHTML = '<i class="bi bi-check-circle"></i> GEE conectado - Listo';
+                } else { throw new Error(data.mensaje); }
+            } catch(e) {
+                badge.className = 'badge bg-danger'; badge.innerHTML = '<i class="bi bi-x-circle"></i> GEE Error';
+                box.className = 'gee-status error'; box.innerHTML = '<i class="bi bi-x-circle"></i> ' + e.message;
+                document.getElementById('btnIniciarExtraccion').disabled = true;
+            }
+        }
+
         function initMap() {
-            map = L.map('map').setView([0,0], 2);
+            map = L.map('map').setView([0, 0], 2);
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
         }
 
         function initCharts() {
-            const config = {
-                type: 'line',
-                data: { labels: [], datasets: [{ label: 'Flujo SO2 (ton/día)', data: [], borderColor: '#2c3e50', backgroundColor: 'rgba(44,62,80,0.1)', fill: true, tension: 0.2, pointRadius: 4 }] },
-                options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
-            };
-            chartDashboard = new Chart(document.getElementById('chartDashboard'), JSON.parse(JSON.stringify(config)));
-            chartResultados = new Chart(document.getElementById('chartResultados'), JSON.parse(JSON.stringify(config)));
+            const cfg = (c) => ({ type:'line', data:{labels:[],datasets:[{label:'Flujo SO2 (t/d)',data:[],borderColor:c,backgroundColor:c+'22',fill:true,tension:0.3}]}, options:{responsive:true,scales:{y:{beginAtZero:true}}} });
+            chartDashboard = new Chart(document.getElementById('chartDashboard'), cfg('#3498db'));
+            chartResultados = new Chart(document.getElementById('chartResultados'), cfg('#2c3e50'));
         }
 
         function setDefaultDates() {
             const hoy = new Date().toISOString().split('T')[0];
-            const hace30 = new Date(Date.now() - 30*24*60*60*1000).toISOString().split('T')[0];
-            document.getElementById('fechaInicio').value = hace30;
-            document.getElementById('fechaFin').value = hoy;
-            document.getElementById('fechaDesde').value = hace30;
-            document.getElementById('fechaHasta').value = hoy;
+            const hace30 = new Date(Date.now()-30*24*60*60*1000).toISOString().split('T')[0];
+            ['fechaInicio','fechaDesde'].forEach(id => document.getElementById(id).value = hace30);
+            ['fechaFin','fechaHasta'].forEach(id => document.getElementById(id).value = hoy);
         }
 
         function setupEvents() {
@@ -350,343 +353,338 @@
             document.getElementById('filtroVolcanImg').onchange = renderImagenes;
             document.getElementById('btnVistaDiaria').onclick = () => cambiarVista('diaria');
             document.getElementById('btnVistaDetalle').onclick = () => cambiarVista('detalle');
+            document.getElementById('btnBorrarImagenes').onclick = borrarImagenesSeleccionadas;
+            document.getElementById('btnBorrarResultados').onclick = borrarResultados;
+            document.getElementById('checkAllImg').onchange = e => document.querySelectorAll('.img-check').forEach(c=>c.checked=e.target.checked);
             document.getElementById('volcanPredef').onchange = e => {
                 const v = PREDEFINIDOS[e.target.value];
-                if(v) {
-                    document.getElementById('nombreVolcan').value = v.nombre;
-                    document.getElementById('paisVolcan').value = v.pais;
-                    document.getElementById('latVolcan').value = v.lat;
-                    document.getElementById('lonVolcan').value = v.lon;
-                    document.getElementById('altVolcan').value = v.alt;
-                }
+                if(v) { document.getElementById('nombreVolcan').value=v.nombre; document.getElementById('paisVolcan').value=v.pais; document.getElementById('latVolcan').value=v.lat; document.getElementById('lonVolcan').value=v.lon; document.getElementById('altVolcan').value=v.alt; }
             };
+            document.getElementById('volcanDashboard').onchange = e => { if(e.target.value) cargarDatosVolcan(parseInt(e.target.value)); };
         }
 
-        async function loadAll() {
-            await loadVolcanes();
-            await loadImagenes();
-            await loadStats();
-        }
+        async function loadAll() { await loadVolcanes(); await loadImagenes(); await loadStats(); }
 
-        // ==================== VOLCANES ====================
         async function loadVolcanes() {
             try {
                 volcanes = await (await fetch(`${API}/volcanes`)).json();
-                renderVolcanes();
-                updateSelects();
-                updateMap();
+                renderVolcanes(); updateSelects(); updateMap();
             } catch(e) { console.error(e); }
         }
 
         function renderVolcanes() {
-            document.querySelector('#tablaVolcanes tbody').innerHTML = volcanes.map(v => `
-                <tr>
-                    <td>${v.id}</td>
-                    <td><strong>${v.nombre}</strong></td>
-                    <td>${v.pais||'-'}</td>
-                    <td>${v.latitud?.toFixed(3)}</td>
-                    <td>${v.longitud?.toFixed(3)}</td>
-                    <td>${v.altitud_m||'-'}</td>
-                    <td><button class="btn btn-sm btn-outline-danger" onclick="eliminarVolcan(${v.id})"><i class="bi bi-trash"></i></button></td>
-                </tr>
-            `).join('');
+            document.querySelector('#tablaVolcanes tbody').innerHTML = volcanes.map(v => 
+                `<tr><td>${v.id}</td><td><strong>${v.nombre}</strong></td><td>${v.pais||'-'}</td><td>${v.latitud?.toFixed(2)}</td><td>${v.longitud?.toFixed(2)}</td><td>${v.altitud_m||'-'}</td><td><button class="btn btn-sm btn-outline-danger" onclick="eliminarVolcan(${v.id})"><i class="bi bi-trash"></i></button></td></tr>`
+            ).join('');
         }
 
         function updateSelects() {
-            const opts = '<option value="">Seleccionar...</option>' + volcanes.map(v => `<option value="${v.id}">${v.nombre}</option>`).join('');
-            const optsAll = '<option value="">Todos</option>' + volcanes.map(v => `<option value="${v.id}">${v.nombre}</option>`).join('');
-            document.getElementById('volcanExtraccion').innerHTML = opts;
-            document.getElementById('volcanResultados').innerHTML = optsAll;
-            document.getElementById('filtroVolcanImg').innerHTML = optsAll;
+            const opts = '<option value="">Seleccionar...</option>' + volcanes.map(v=>`<option value="${v.id}">${v.nombre}</option>`).join('');
+            const optsAll = '<option value="">Todos</option>' + volcanes.map(v=>`<option value="${v.id}">${v.nombre}</option>`).join('');
+            ['volcanExtraccion','volcanDashboard'].forEach(id => document.getElementById(id).innerHTML = opts);
+            ['volcanResultados','filtroVolcanImg'].forEach(id => document.getElementById(id).innerHTML = optsAll);
         }
 
         function updateMap() {
-            map.eachLayer(l => { if(l instanceof L.Marker) map.removeLayer(l); });
-            volcanes.forEach(v => {
-                if(v.latitud && v.longitud) {
-                    L.marker([v.latitud, v.longitud]).addTo(map)
-                        .bindPopup(`<strong>${v.nombre}</strong><br>${v.pais||''}<br>Alt: ${v.altitud_m||'-'}m`);
-                }
-            });
-            if(volcanes.length) {
-                const bounds = volcanes.filter(v=>v.latitud).map(v=>[v.latitud,v.longitud]);
-                if(bounds.length) map.fitBounds(bounds, {padding:[30,30]});
-            }
+            Object.values(markers).forEach(m => map.removeLayer(m)); markers = {};
+            volcanes.forEach(v => { if(v.latitud && v.longitud) markers[v.id] = L.marker([v.latitud, v.longitud]).addTo(map).bindPopup(`<strong>${v.nombre}</strong><br>${v.pais||''}`); });
+            if(volcanes.length) map.fitBounds(volcanes.filter(v=>v.latitud).map(v=>[v.latitud,v.longitud]), {padding:[50,50]});
         }
 
         async function crearVolcan() {
-            const data = {
-                nombre: document.getElementById('nombreVolcan').value,
-                pais: document.getElementById('paisVolcan').value,
-                latitud: parseFloat(document.getElementById('latVolcan').value),
-                longitud: parseFloat(document.getElementById('lonVolcan').value),
-                altitud_m: parseInt(document.getElementById('altVolcan').value)
-            };
-            await fetch(`${API}/volcanes`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) });
-            document.getElementById('formVolcan').reset();
-            loadVolcanes();
+            const data = { nombre: document.getElementById('nombreVolcan').value, pais: document.getElementById('paisVolcan').value, latitud: parseFloat(document.getElementById('latVolcan').value), longitud: parseFloat(document.getElementById('lonVolcan').value), altitud_m: parseInt(document.getElementById('altVolcan').value) };
+            try { const res = await fetch(`${API}/volcanes`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) }); if(res.ok) { showToast('Volcán agregado', 'success'); document.getElementById('formVolcan').reset(); loadVolcanes(); } } catch(e) { showToast('Error', 'error'); }
         }
 
         async function eliminarVolcan(id) {
-            if(confirm('¿Eliminar este volcán?')) {
-                await fetch(`${API}/volcanes/${id}`, {method:'DELETE'});
-                loadVolcanes();
-            }
+            if(!confirm('¿Eliminar volcán y todos sus datos?')) return;
+            try { await fetch(`${API}/volcanes/${id}`, {method:'DELETE'}); showToast('Eliminado', 'success'); loadVolcanes(); loadImagenes(); } catch(e) {}
         }
 
-        // ==================== IMÁGENES ====================
-        async function loadImagenes() {
+        async function cargarDatosVolcan(volcanId) {
             try {
-                imagenes = await (await fetch(`${API}/imagenes`)).json();
-                renderImagenes();
+                const data = await (await fetch(`${API}/resultados?volcan_id=${volcanId}&limite=100`)).json();
+                if(!data.length) { chartDashboard.data.labels=[]; chartDashboard.data.datasets[0].data=[]; chartDashboard.update(); return; }
+                const porDia = {};
+                data.forEach(r => { const f=r.fecha_hora.split('T')[0]; if(!porDia[f]) porDia[f]=[]; if(r.flujo_so2_ton_dia) porDia[f].push(r.flujo_so2_ton_dia); });
+                const fechas = Object.keys(porDia).sort();
+                chartDashboard.data.labels = fechas;
+                chartDashboard.data.datasets[0].data = fechas.map(f => porDia[f].reduce((a,b)=>a+b,0)/porDia[f].length);
+                chartDashboard.update();
             } catch(e) { console.error(e); }
         }
 
+        async function loadImagenes() {
+            try { imagenes = await (await fetch(`${API}/imagenes`)).json(); renderImagenes(); loadStats(); } catch(e) {}
+        }
+
         function renderImagenes() {
-            const filtro = document.getElementById('filtroVolcanImg').value;
-            const lista = filtro ? imagenes.filter(i => i.volcan_id == filtro) : imagenes;
+            let lista = imagenes;
+            const fv = document.getElementById('filtroVolcanImg').value;
+            if(fv) lista = lista.filter(i => i.volcan_id == fv);
             document.getElementById('contadorImg').textContent = lista.length;
-            
             document.querySelector('#tablaImagenes tbody').innerHTML = lista.map(i => {
-                const v = volcanes.find(x => x.id === i.volcan_id);
-                return `
-                <tr>
-                    <td>${i.id}</td>
-                    <td>${new Date(i.fecha_adquisicion).toLocaleString('es-AR')}</td>
-                    <td>${v?.nombre || i.volcan_id}</td>
-                    <td>${i.descargado ? '<span class="badge bg-success">Sí</span>' : '<span class="badge bg-warning">No</span>'}</td>
-                    <td>${i.procesado ? '<span class="badge bg-success">Sí</span>' : '<span class="badge bg-secondary">No</span>'}</td>
-                    <td>
-                        ${i.descargado && !i.procesado ? `<button class="btn btn-sm btn-primary" onclick="procesarImagen(${i.id})"><i class="bi bi-gear"></i> Procesar</button>` : ''}
-                    </td>
-                </tr>
-            `}).join('');
+                const v = volcanes.find(x=>x.id===i.volcan_id);
+                const estado = i.procesado ? '<span class="badge bg-success">OK</span>' : i.descargado ? '<span class="badge bg-warning">Pend</span>' : '<span class="badge bg-secondary">-</span>';
+                return `<tr><td><input type="checkbox" class="img-check" value="${i.id}"></td><td>${i.id}</td><td>${new Date(i.fecha_adquisicion).toLocaleDateString('es-AR')}</td><td>${v?.nombre||'-'}</td><td>${estado}</td><td>${i.descargado && !i.procesado ? `<button class="btn btn-sm btn-primary" onclick="procesarImagen(${i.id})"><i class="bi bi-gear"></i></button>`:''}<button class="btn btn-sm btn-outline-danger ms-1" onclick="borrarImagen(${i.id})"><i class="bi bi-trash"></i></button></td></tr>`;
+            }).join('');
         }
 
         async function iniciarExtraccion() {
-            const data = {
-                volcan_id: parseInt(document.getElementById('volcanExtraccion').value),
-                fecha_inicio: document.getElementById('fechaInicio').value,
-                fecha_fin: document.getElementById('fechaFin').value
-            };
-            await fetch(`${API}/extraccion/iniciar`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) });
-            alert('Extracción iniciada. Las imágenes se descargarán en segundo plano.');
-            setTimeout(loadImagenes, 3000);
+            const btn = document.getElementById('btnIniciarExtraccion');
+            btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Descargando...';
+            try {
+                const data = {
+                    volcan_id: parseInt(document.getElementById('volcanExtraccion').value),
+                    fecha_inicio: document.getElementById('fechaInicio').value,
+                    fecha_fin: document.getElementById('fechaFin').value,
+                    radio_km: 100,
+                    una_por_dia: false
+                };
+                const res = await fetch(`${API}/gee/descargar`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) });
+                if(res.ok) { showToast('Descarga completada', 'success'); loadImagenes(); }
+                else { const err = await res.json(); showToast(err.detail || 'Error', 'error'); }
+            } catch(e) { showToast('Error de conexión', 'error'); }
+            btn.disabled = false; btn.innerHTML = '<i class="bi bi-cloud-download"></i> Descargar desde GEE';
         }
 
         async function procesarImagen(id) {
-            await fetch(`${API}/calculos/procesar/${id}`, {method:'POST'});
-            alert('Procesando imagen ' + id);
-            setTimeout(loadImagenes, 2000);
+            try {
+                const res = await fetch(`${API}/gee/procesar/${id}`, {method:'POST'});
+                if(res.ok) { showToast(`Imagen ${id} procesada`, 'success'); loadImagenes(); }
+                else { const err = await res.json(); showToast(err.detail || 'Error procesando', 'error'); }
+            } catch(e) { showToast('Error de conexión', 'error'); }
         }
 
         async function procesarTodas() {
-            const volcanId = document.getElementById('volcanExtraccion').value;
-            if(!volcanId) { alert('Selecciona un volcán primero'); return; }
-            await fetch(`${API}/calculos/procesar-todas/${volcanId}`, {method:'POST'});
-            alert('Procesando todas las imágenes pendientes');
-            setTimeout(loadImagenes, 3000);
+            const vid = document.getElementById('volcanExtraccion').value;
+            if(!vid) { showToast('Seleccioná un volcán', 'warning'); return; }
+            const btn = document.getElementById('btnProcesarTodas');
+            btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Procesando...';
+            try {
+                const res = await fetch(`${API}/gee/procesar-lote?volcan_id=${vid}`, {method:'POST'});
+                const data = await res.json();
+                showToast(data.mensaje || 'Procesamiento completado', 'success');
+                loadImagenes();
+            } catch(e) { showToast('Error de conexión', 'error'); }
+            btn.disabled = false; btn.innerHTML = '<i class="bi bi-play-fill"></i> Procesar Pendientes';
         }
 
-        // ==================== RESULTADOS ====================
+        async function borrarImagen(id) { if(!confirm('¿Borrar?')) return; try { await fetch(`${API}/imagenes/${id}`, {method:'DELETE'}); loadImagenes(); } catch(e) {} }
+
+        async function borrarImagenesSeleccionadas() {
+            const checks = [...document.querySelectorAll('.img-check:checked')];
+            if(!checks.length) return; if(!confirm(`¿Borrar ${checks.length} imágenes?`)) return;
+            for(const c of checks) { await fetch(`${API}/imagenes/${c.value}`, {method:'DELETE'}); }
+            loadImagenes();
+        }
+
         async function buscarResultados() {
-            const volcan = document.getElementById('volcanResultados').value;
-            const desde = document.getElementById('fechaDesde').value;
-            const hasta = document.getElementById('fechaHasta').value;
-            
+            const v = document.getElementById('volcanResultados').value;
+            const d = document.getElementById('fechaDesde').value;
+            const h = document.getElementById('fechaHasta').value;
             let url = `${API}/resultados?`;
-            if(volcan) url += `volcan_id=${volcan}&`;
-            if(desde) url += `fecha_inicio=${desde}&`;
-            if(hasta) url += `fecha_fin=${hasta}`;
-            
+            if(v) url += `volcan_id=${v}&`; if(d) url += `fecha_inicio=${d}&`; if(h) url += `fecha_fin=${h}`;
             try {
                 resultados = await (await fetch(url)).json();
-                
-                if(resultados.length === 0) {
-                    document.getElementById('sinResultados').style.display = 'block';
-                    document.getElementById('vistaDiaria').style.display = 'none';
-                    document.getElementById('vistaDetalle').style.display = 'none';
-                } else {
-                    document.getElementById('sinResultados').style.display = 'none';
-                    renderResultadosDiarios();
-                    renderResultadosDetalle();
-                    updateChartResultados();
-                }
+                if(!resultados.length) { document.getElementById('sinResultados').style.display='block'; document.getElementById('vistaDiaria').style.display='none'; return; }
+                document.getElementById('sinResultados').style.display='none'; document.getElementById('vistaDiaria').style.display='block';
+                renderResultadosDiarios(); renderResultadosDetalle(); updateChartResultados();
             } catch(e) { console.error(e); }
         }
 
         function renderResultadosDiarios() {
-            // Agrupar por día y volcán
             const porDia = {};
             resultados.forEach(r => {
-                const fecha = r.fecha_hora.split('T')[0];
-                const key = `${fecha}_${r.volcan_id}`;
-                if(!porDia[key]) porDia[key] = { fecha, volcan_id: r.volcan_id, flujos: [], registros: [] };
-                if(r.flujo_so2_ton_dia) porDia[key].flujos.push(r.flujo_so2_ton_dia);
-                porDia[key].registros.push(r);
+                const f = r.fecha_hora.split('T')[0]; const k = `${f}_${r.volcan_id}`;
+                if(!porDia[k]) porDia[k] = {fecha:f, volcan_id:r.volcan_id, flujos:[], registros:[]};
+                if(r.flujo_so2_ton_dia) porDia[k].flujos.push(r.flujo_so2_ton_dia);
+                porDia[k].registros.push(r);
             });
             
-            const tbody = document.querySelector('#tablaResultadosDiarios tbody');
-            tbody.innerHTML = Object.entries(porDia).sort((a,b) => b[1].fecha.localeCompare(a[1].fecha)).map(([key, dia], idx) => {
-                const v = volcanes.find(x => x.id === dia.volcan_id);
-                const prom = dia.flujos.length ? dia.flujos.reduce((a,b)=>a+b,0)/dia.flujos.length : 0;
-                const std = dia.flujos.length > 1 ? Math.sqrt(dia.flujos.map(x=>Math.pow(x-prom,2)).reduce((a,b)=>a+b,0)/(dia.flujos.length-1)) : 0;
-                const calidad = dia.flujos.length >= 3 ? 'Bueno' : dia.flujos.length >= 1 ? 'Aceptable' : 'Malo';
-                const badge = calidad === 'Bueno' ? 'badge-bueno' : calidad === 'Aceptable' ? 'badge-aceptable' : 'badge-malo';
-                
-                // Detalle de mediciones del día
-                const detalleRows = dia.registros.map(r => {
-                    const franjas = r.metadatos_json?.franjas || [];
-                    return `<tr>
-                        <td>${new Date(r.fecha_hora).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}</td>
-                        <td>${r.flujo_so2_ton_dia?.toFixed(1) || '-'}</td>
-                        <td>${r.velocidad_viento_ms?.toFixed(1) || '-'} m/s</td>
-                        <td>${franjas.length} franjas</td>
-                    </tr>`;
-                }).join('');
-                
-                return `
-                    <tr class="expandable-row" onclick="toggleRow('${key}')">
-                        <td><i class="bi bi-chevron-right" id="chev-${key}"></i></td>
-                        <td><strong>${dia.fecha}</strong></td>
-                        <td>${v?.nombre || dia.volcan_id}</td>
-                        <td><strong>${prom.toFixed(1)}</strong></td>
-                        <td>± ${std.toFixed(1)}</td>
-                        <td>${dia.flujos.length}</td>
-                        <td><span class="badge ${badge}">${calidad}</span></td>
-                    </tr>
-                    <tr class="detail-row" id="row-${key}">
-                        <td colspan="7">
-                            <div class="p-2">
-                                <strong>Mediciones del día:</strong>
-                                <table class="table table-sm mt-2 mb-0">
-                                    <thead><tr><th>Hora</th><th>Flujo (t/d)</th><th>Viento</th><th>Franjas</th></tr></thead>
-                                    <tbody>${detalleRows}</tbody>
-                                </table>
-                            </div>
-                        </td>
-                    </tr>
-                `;
+            document.querySelector('#tablaResultadosDiarios tbody').innerHTML = Object.entries(porDia).sort((a,b)=>b[1].fecha.localeCompare(a[1].fecha)).map(([k, d]) => {
+                const v = volcanes.find(x=>x.id===d.volcan_id);
+                const prom = d.flujos.length ? d.flujos.reduce((a,b)=>a+b,0)/d.flujos.length : 0;
+                const std = d.flujos.length > 1 ? Math.sqrt(d.flujos.map(x=>Math.pow(x-prom,2)).reduce((a,b)=>a+b,0)/(d.flujos.length-1)) : 0;
+                const det = d.registros.map(r => `<tr class="resultado-row" onclick='mostrarInfoResultado(${JSON.stringify(r)})'><td>${new Date(r.fecha_hora).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}</td><td>${r.flujo_so2_ton_dia?.toFixed(1)||'-'}</td><td>${r.velocidad_viento_ms?.toFixed(1)||'-'}</td><td>${(r.metadatos_json?.franjas||[]).filter(f=>f.flujo_kgs).length}/6</td></tr>`).join('');
+                return `<tr class="expandable-row" onclick="toggleRow('${k}')"><td><i class="bi bi-chevron-right" id="chev-${k}"></i></td><td><strong>${d.fecha}</strong></td><td>${v?.nombre||'-'}</td><td><strong>${prom.toFixed(1)}</strong></td><td>±${std.toFixed(1)}</td><td>${d.flujos.length}</td></tr><tr class="detail-row" id="row-${k}"><td colspan="6"><table class="table table-sm mt-2 mb-0"><thead><tr><th>Hora</th><th>Flujo</th><th>Viento</th><th>Franjas</th></tr></thead><tbody>${det}</tbody></table></td></tr>`;
             }).join('');
         }
 
         function renderResultadosDetalle() {
-            const tbody = document.querySelector('#tablaDetalle tbody');
-            tbody.innerHTML = resultados.map(r => {
-                const franjas = r.metadatos_json?.franjas || [];
+            document.querySelector('#tablaDetalle tbody').innerHTML = resultados.map(r => {
+                const fr = r.metadatos_json?.franjas || [];
+                const f = h => fr.find(x=>x.hora===h)?.flujo_kgs?.toFixed(4) || '-';
                 const fecha = new Date(r.fecha_hora);
-                
-                // Obtener flujo de cada franja
-                const getFranja = h => {
-                    const f = franjas.find(x => x.hora === h);
-                    return f?.flujo_kgs?.toFixed(4) || '-';
-                };
-                
-                return `
-                    <tr>
-                        <td>${fecha.toLocaleDateString('es-AR')}</td>
-                        <td>${fecha.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}</td>
-                        <td>${r.metadatos_json?.altura_viento_m || r.altitud_viento_m || '-'}</td>
-                        <td>${r.direccion_viento_grados?.toFixed(0) || '-'}</td>
-                        <td>${r.velocidad_viento_ms?.toFixed(1) || '-'}</td>
-                        <td>${getFranja(0.5)}</td>
-                        <td>${getFranja(1.0)}</td>
-                        <td>${getFranja(1.5)}</td>
-                        <td>${getFranja(2.0)}</td>
-                        <td>${getFranja(2.5)}</td>
-                        <td>${getFranja(3.0)}</td>
-                        <td><strong>${r.flujo_so2_kg_s?.toFixed(4) || '-'}</strong></td>
-                        <td><strong>${r.flujo_so2_ton_dia?.toFixed(1) || '-'}</strong></td>
-                    </tr>
-                `;
+                return `<tr class="resultado-row" onclick='mostrarInfoResultado(${JSON.stringify(r)})'><td>${fecha.toLocaleDateString('es-AR')}</td><td>${fecha.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}</td><td>${r.altitud_viento_m||'-'}</td><td>${r.direccion_viento_grados?.toFixed(0)||'-'}</td><td>${r.velocidad_viento_ms?.toFixed(1)||'-'}</td><td>${f(0.5)}</td><td>${f(1)}</td><td>${f(1.5)}</td><td>${f(2)}</td><td>${f(2.5)}</td><td>${f(3)}</td><td>${r.flujo_so2_kg_s?.toFixed(4)||'-'}</td><td><strong>${r.flujo_so2_ton_dia?.toFixed(1)||'-'}</strong></td></tr>`;
             }).join('');
         }
 
-        function toggleRow(key) {
-            const row = document.getElementById(`row-${key}`);
-            const chev = document.getElementById(`chev-${key}`);
-            row.classList.toggle('show');
-            chev.classList.toggle('bi-chevron-right');
-            chev.classList.toggle('bi-chevron-down');
+        function mostrarInfoResultado(r) {
+            const franjas = r.metadatos_json?.franjas || [];
+            const franjasValidas = franjas.filter(f => f.flujo_kgs !== null && f.flujo_kgs !== undefined).length;
+            const volcan = volcanes.find(v => v.id === r.volcan_id);
+            
+            let franjasHtml = '<div class="franjas-mini">';
+            [0.5, 1, 1.5, 2, 2.5, 3].forEach(h => {
+                const fr = franjas.find(f => f.hora === h);
+                const activa = fr && fr.flujo_kgs !== null;
+                franjasHtml += `<div class="franja-box ${activa ? 'activa' : 'inactiva'}">${h}h<br>${activa ? (fr.flujo_kgs*86.4).toFixed(0) : '-'}</div>`;
+            });
+            franjasHtml += '</div>';
+            
+            // Construir URL del preview con pluma
+            const imgId = r.imagen_id;
+            const previewUrl = imgId ? `${API}/imagenes/${imgId}/preview-con-pluma?resultado_id=${r.id}` : null;
+            const previewSimpleUrl = imgId ? `${API}/imagenes/${imgId}/preview` : null;
+            
+            // Imagen section
+            let imagenHtml = '';
+            if (imgId) {
+                imagenHtml = `
+                    <div class="label mt-3"><i class="bi bi-image"></i> Imagen TROPOMI</div>
+                    <div style="position:relative; margin-top:8px; border-radius:8px; overflow:hidden; border:1px solid #333;">
+                        <img id="previewImg" src="${previewUrl}" 
+                             alt="SO2 Preview" 
+                             style="width:100%; display:block; background:#111;"
+                             onerror="this.onerror=null; this.src='${previewSimpleUrl}'; if(!this.complete || this.naturalWidth===0) this.parentElement.innerHTML='<div style=\\'padding:20px;text-align:center;color:#666\\'>No se pudo cargar preview</div>';">
+                        <div style="position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,0.6);padding:4px 8px;display:flex;justify-content:space-between;align-items:center;">
+                            <small style="color:#aaa;">Imagen #${imgId}</small>
+                            <div>
+                                <button class="btn btn-sm" style="color:#00d9ff;padding:2px 6px;" onclick="cambiarColormap(${imgId}, ${r.id})" title="Cambiar colormap">
+                                    <i class="bi bi-palette"></i>
+                                </button>
+                                <a href="${previewUrl}" target="_blank" class="btn btn-sm" style="color:#00d9ff;padding:2px 6px;" title="Abrir en nueva pestaña">
+                                    <i class="bi bi-box-arrow-up-right"></i>
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            } else {
+                imagenHtml = `
+                    <div class="label mt-3"><i class="bi bi-image"></i> Imagen TROPOMI</div>
+                    <div style="margin-top:8px; padding:20px; text-align:center; border:1px dashed #444; border-radius:8px; color:#666;">
+                        <i class="bi bi-image" style="font-size:2rem;"></i><br>
+                        <small>Sin imagen asociada</small>
+                    </div>
+                `;
+            }
+            
+            document.getElementById('infoPanelContent').innerHTML = `
+                <div class="valor-grande">${r.flujo_so2_ton_dia?.toFixed(1) || '-'} <small style="font-size:0.4em">t/d</small></div>
+                
+                <div class="row mt-3">
+                    <div class="col-6">
+                        <div class="label">Volcán</div>
+                        <div class="dato">${volcan?.nombre || '-'}</div>
+                    </div>
+                    <div class="col-6">
+                        <div class="label">Fecha/Hora</div>
+                        <div class="dato">${new Date(r.fecha_hora).toLocaleString('es-AR')}</div>
+                    </div>
+                </div>
+                
+                <div class="row mt-2">
+                    <div class="col-4">
+                        <div class="label">Viento</div>
+                        <div class="dato">${r.velocidad_viento_ms?.toFixed(1) || '-'} m/s</div>
+                    </div>
+                    <div class="col-4">
+                        <div class="label">Dirección</div>
+                        <div class="dato">${r.direccion_viento_grados?.toFixed(0) || '-'}°</div>
+                    </div>
+                    <div class="col-4">
+                        <div class="label">Altitud</div>
+                        <div class="dato">${r.altitud_viento_m || '-'} m</div>
+                    </div>
+                </div>
+                
+                <div class="row mt-2">
+                    <div class="col-6">
+                        <div class="label">Azimut Pluma</div>
+                        <div class="dato">${r.azimut_pluma_grados?.toFixed(1) || '-'}°</div>
+                    </div>
+                    <div class="col-6">
+                        <div class="label">Franjas Válidas</div>
+                        <div class="dato">${franjasValidas}/6</div>
+                    </div>
+                </div>
+                
+                <div class="label mt-3">Flujo por Franja (t/d)</div>
+                ${franjasHtml}
+                
+                ${imagenHtml}
+            `;
         }
 
-        function cambiarVista(tipo) {
-            document.getElementById('vistaDiaria').style.display = tipo === 'diaria' ? 'block' : 'none';
-            document.getElementById('vistaDetalle').style.display = tipo === 'detalle' ? 'block' : 'none';
-            document.getElementById('btnVistaDiaria').className = tipo === 'diaria' ? 'btn btn-light active' : 'btn btn-outline-light';
-            document.getElementById('btnVistaDetalle').className = tipo === 'detalle' ? 'btn btn-light active' : 'btn btn-outline-light';
+        // Colormaps disponibles para ciclar
+        const COLORMAPS = ['hot', 'inferno', 'viridis', 'plasma', 'magma', 'jet'];
+        let currentColormapIdx = 0;
+        
+        function cambiarColormap(imgId, resultadoId) {
+            currentColormapIdx = (currentColormapIdx + 1) % COLORMAPS.length;
+            const cmap = COLORMAPS[currentColormapIdx];
+            const img = document.getElementById('previewImg');
+            if (img) {
+                img.src = `${API}/imagenes/${imgId}/preview-con-pluma?resultado_id=${resultadoId}&colormap=${cmap}`;
+            }
+        }
+
+        function toggleRow(k) {
+            document.getElementById(`row-${k}`).classList.toggle('show');
+            const c = document.getElementById(`chev-${k}`);
+            c.classList.toggle('bi-chevron-right'); c.classList.toggle('bi-chevron-down');
+        }
+
+        function cambiarVista(t) {
+            document.getElementById('vistaDiaria').style.display = t==='diaria'?'block':'none';
+            document.getElementById('vistaDetalle').style.display = t==='detalle'?'block':'none';
+            document.getElementById('btnVistaDiaria').className = t==='diaria'?'btn btn-light active':'btn btn-outline-light';
+            document.getElementById('btnVistaDetalle').className = t==='detalle'?'btn btn-light active':'btn btn-outline-light';
         }
 
         function updateChartResultados() {
-            // Agrupar por día
             const porDia = {};
-            resultados.forEach(r => {
-                const f = r.fecha_hora.split('T')[0];
-                if(!porDia[f]) porDia[f] = [];
-                if(r.flujo_so2_ton_dia) porDia[f].push(r.flujo_so2_ton_dia);
-            });
-            
+            resultados.forEach(r => { const f=r.fecha_hora.split('T')[0]; if(!porDia[f]) porDia[f]=[]; if(r.flujo_so2_ton_dia) porDia[f].push(r.flujo_so2_ton_dia); });
             const fechas = Object.keys(porDia).sort();
-            const proms = fechas.map(f => porDia[f].reduce((a,b)=>a+b,0)/porDia[f].length);
-            
             chartResultados.data.labels = fechas;
-            chartResultados.data.datasets[0].data = proms;
+            chartResultados.data.datasets[0].data = fechas.map(f => porDia[f].reduce((a,b)=>a+b,0)/porDia[f].length);
             chartResultados.update();
         }
 
-        // ==================== EXPORTAR CSV ====================
-        function exportarCSV() {
-            if(!resultados.length) { alert('No hay datos para exportar'); return; }
-            
-            // Formato igual al MATLAB
-            let csv = 'Fecha;Hora;Volcan;Altura_Viento_m;Dir_Viento;Vel_Viento_ms;';
-            csv += 'DCV_0.5h;DCV_1h;DCV_1.5h;DCV_2h;DCV_2.5h;DCV_3h;';
-            csv += 'Flux_0.5h;Flux_1h;Flux_1.5h;Flux_2h;Flux_2.5h;Flux_3h;';
-            csv += 'Flux_Prom_kgs;Flux_Total_td\n';
-            
-            resultados.forEach(r => {
-                const v = volcanes.find(x => x.id === r.volcan_id);
-                const franjas = r.metadatos_json?.franjas || [];
-                
-                csv += `${r.fecha_hora.split('T')[0]};`;
-                csv += `${r.fecha_hora.split('T')[1]?.substring(0,5)||''};`;
-                csv += `${v?.nombre||''};`;
-                csv += `${r.metadatos_json?.altura_viento_m || r.altitud_viento_m || ''};`;
-                csv += `${r.direccion_viento_grados?.toFixed(1)||''};`;
-                csv += `${r.velocidad_viento_ms?.toFixed(1)||''};`;
-                
-                // DCV (SO2 mol/m²) por franja
-                [0.5,1,1.5,2,2.5,3].forEach(h => {
-                    const f = franjas.find(x=>x.hora===h);
-                    csv += `${f?.so2_molm2?.toExponential(3)||''};`;
-                });
-                
-                // Flujo por franja
-                [0.5,1,1.5,2,2.5,3].forEach(h => {
-                    const f = franjas.find(x=>x.hora===h);
-                    csv += `${f?.flujo_kgs?.toFixed(6)||''};`;
-                });
-                
-                csv += `${r.flujo_so2_kg_s?.toFixed(6)||''};`;
-                csv += `${r.flujo_so2_ton_dia?.toFixed(2)||''}\n`;
-            });
-            
-            // Descargar
-            const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
-            const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = `SO2FC_Resultados_${new Date().toISOString().split('T')[0]}.csv`;
-            a.click();
+        async function borrarResultados() {
+            const v = document.getElementById('volcanResultados').value;
+            if(!v) { showToast('Seleccioná volcán', 'warning'); return; }
+            if(!confirm('¿Borrar resultados?')) return;
+            let url = `${API}/resultados/borrar?volcan_id=${v}`;
+            const d = document.getElementById('fechaDesde').value; const h = document.getElementById('fechaHasta').value;
+            if(d) url += `&fecha_inicio=${d}`; if(h) url += `&fecha_fin=${h}`;
+            await fetch(url, {method:'DELETE'}); buscarResultados();
         }
 
-        // ==================== ESTADÍSTICAS ====================
+        function exportarCSV() {
+            if(!resultados.length) return;
+            let csv = 'Fecha;Hora;Volcan;Alt_viento_m;Dir_viento;Vel_viento_ms;Azimut_pluma;F0.5;F1;F1.5;F2;F2.5;F3;Prom_kgs;Total_td\n';
+            resultados.forEach(r => {
+                const v = volcanes.find(x=>x.id===r.volcan_id);
+                const fr = r.metadatos_json?.franjas || [];
+                csv += `${r.fecha_hora.split('T')[0]};${r.fecha_hora.split('T')[1]?.substring(0,5)||''};${v?.nombre||''};${r.altitud_viento_m||''};${r.direccion_viento_grados?.toFixed(1)||''};${r.velocidad_viento_ms?.toFixed(1)||''};${r.azimut_pluma_grados?.toFixed(1)||''};`;
+                [0.5,1,1.5,2,2.5,3].forEach(h => { const f=fr.find(x=>x.hora===h); csv += `${f?.flujo_kgs?.toFixed(6)||''};`; });
+                csv += `${r.flujo_so2_kg_s?.toFixed(6)||''};${r.flujo_so2_ton_dia?.toFixed(2)||''}\n`;
+            });
+            const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv'}));
+            a.download = `SO2_${new Date().toISOString().split('T')[0]}.csv`; a.click();
+        }
+
         async function loadStats() {
+            document.getElementById('statVolcanes').textContent = volcanes.length;
+            document.getElementById('statImagenes').textContent = imagenes.length;
             try {
-                const stats = await (await fetch(`${API}/estadisticas`)).json();
-                document.getElementById('statVolcanes').textContent = stats.volcanes || volcanes.length || 0;
-                document.getElementById('statImagenes').textContent = stats.imagenes_total || imagenes.length || 0;
-                document.getElementById('statResultados').textContent = stats.resultados || 0;
-            } catch(e) { console.error(e); }
+                const all = await (await fetch(`${API}/resultados?limite=100`)).json();
+                document.getElementById('statResultados').textContent = all.length;
+                document.getElementById('statUltimo').textContent = all.length && all[0].flujo_so2_ton_dia ? all[0].flujo_so2_ton_dia.toFixed(0) : '-';
+            } catch(e) {}
         }
     </script>
 </body>
