@@ -1,13 +1,14 @@
 """
-Módulo ETL para descarga de datos de viento desde ERA5 (CDS API)
-Reemplaza NCEP Reanalysis para mayor precisión.
+Módulo ETL para descarga de datos de viento desde NCEP/NCAR Reanalysis 1
+via OPeNDAP (NOAA PSL) — la MISMA fuente que usa el profesor en su MATLAB.
 
-ERA5 ventajas sobre NCEP:
-- Resolución espacial: 0.25° (vs 2.5° de NCEP)
-- Resolución temporal: horaria (vs 6 horas de NCEP)
-- Más preciso para comparar con resultados GDAS del profesor
+NCEP/NCAR Reanalysis 1:
+- Resolución espacial: 2.5° x 2.5°
+- Resolución temporal: 6 horas (00, 06, 12, 18 UTC)
+- 17 niveles de presión
+- Fuente: https://psl.noaa.gov/data/gridded/data.ncep.reanalysis.pressure.html
+- Acceso OPeNDAP: https://psl.noaa.gov/thredds/dodsC/Datasets/ncep.reanalysis/
 
-Mantiene la misma interfaz que el downloader anterior para compatibilidad.
 Basado en el método SO2FC del código MATLAB (AnalisisS02_CD_v4.m)
 """
 import numpy as np
@@ -31,37 +32,54 @@ logger = logging.getLogger(__name__)
 # Alturas disponibles ordenadas
 ALTURAS_DISPONIBLES = sorted(PRESSURE_TO_HEIGHT.values())
 
-# Niveles de presión para ERA5 (los 19 del MATLAB del profesor)
-ERA5_PRESSURE_LEVELS = [
-    '1000', '975', '950', '925', '900', '850', '800', '750',
-    '700', '650', '600', '550', '500', '450', '400', '350',
-    '300', '250', '200'
-]
+# Niveles de presión de NCEP Reanalysis 1 (17 niveles)
+# El profesor usa estos mismos (línea 68 del MATLAB):
+# level: 17 Pressure levels (mb): 1000,925,850,700,600,500,400,300,250,200,150,100,70,50,30,20,10
+NCEP_PRESSURE_LEVELS = [1000, 925, 850, 700, 600, 500, 400, 300, 250, 200, 150, 100, 70, 50, 30, 20, 10]
+
+# Mapeo presión→altura del MATLAB del profesor (línea 53 para .nc)
+# Solo las alturas que el profesor usa
+NCEP_PRESSURE_TO_HEIGHT = {
+    1000: 111,
+    925: 762,
+    850: 1458,
+    700: 3013,
+    600: 4204,
+    500: 5576,
+    400: 7187,
+    300: 9166,
+    250: 10366,
+    200: 11787,
+    150: 13503
+}
+
+# URLs OPeNDAP de NCEP Reanalysis 1
+NCEP_OPENDAP_BASE = "https://psl.noaa.gov/thredds/dodsC/Datasets/ncep.reanalysis"
 
 
-class ERA5Downloader:
+class NCEPDownloader:
     """
-    Clase para descargar y procesar datos de viento de ERA5.
-    Compatible con el método SO2FC del código MATLAB.
+    Clase para descargar y procesar datos de viento de NCEP/NCAR Reanalysis 1.
+    Usa la misma fuente de datos que el MATLAB del profesor.
     """
     
     def __init__(self):
-        """Inicializa el descargador de ERA5"""
+        """Inicializa el descargador de NCEP"""
         self.wind_dir = Path(WIND_DIR)
         self.wind_dir.mkdir(parents=True, exist_ok=True)
-        logger.info("ERA5Downloader inicializado")
+        logger.info("NCEPDownloader inicializado")
     
     def _calcular_direccion_viento_matlab(self, u: float, v: float) -> Tuple[float, float]:
         """
         Calcula velocidad y dirección del viento EXACTAMENTE como en MATLAB.
         
-        Del código MATLAB (líneas 443-446):
+        Del código MATLAB (líneas 443-446, 565-568):
             wdir = atan2d(vi, ui);
             if wdir < 0 & wdir > -180
                 wdir = wdir + 360;
             end
         
-        Dirección MATEMÁTICA hacia donde va el viento:
+        Dirección MATEMÁTICA "hacia donde sopla" el viento:
         - 0° = Este, 90° = Norte, 180° = Oeste, 270° = Sur
         """
         velocidad = math.sqrt(u**2 + v**2)
@@ -88,35 +106,28 @@ class ERA5Downloader:
     
     def _obtener_alturas_validas(self, altura_volcan: float) -> List[int]:
         """
-        Obtiene las alturas disponibles válidas para plumas volcánicas.
-        
-        Del código MATLAB del profesor:
-        - Busca en TODAS las alturas entre 1500m y 12000m
-        - NO filtra por altura del volcán (la pluma puede estar
-          a cualquier altura en la distancia de referencia)
-        - La selección de altura se hace por coincidencia de 
-          dirección del viento con el azimut de la pluma
+        Obtiene las alturas disponibles para buscar viento.
+        Se usan TODAS las alturas del mapeo NCEP del profesor.
+        La selección de la altura correcta se hace por coincidencia
+        del azimut de la pluma con la dirección del viento.
         """
-        ALTURA_MIN_PLUMA = 1500
-        ALTURA_MAX_PLUMA = 12000
-        
-        alturas_validas = [
-            h for h in ALTURAS_DISPONIBLES 
-            if h >= ALTURA_MIN_PLUMA and h <= ALTURA_MAX_PLUMA
-        ]
-        
-        return alturas_validas
+        alturas_profesor = sorted(NCEP_PRESSURE_TO_HEIGHT.values())
+        return alturas_profesor
     
-    def _hora_mas_cercana(self, fecha: datetime) -> str:
-        """Redondea a la hora entera más cercana para ERA5 (resolución horaria)"""
-        hora = fecha.hour
-        if fecha.minute >= 30:
-            hora = hora + 1
-            if hora >= 24:
-                hora = 23
-        return f"{hora:02d}:00"
+    def _hora_ncep_mas_cercana(self, fecha: datetime) -> int:
+        """
+        NCEP tiene datos cada 6 horas: 00, 06, 12, 18 UTC.
+        Retorna el índice temporal más cercano.
+        
+        Del MATLAB (línea 411):
+            [val,idx]=min(abs(datesWind-dateSO2));
+        """
+        hora_decimal = fecha.hour + fecha.minute / 60
+        horas_ncep = [0, 6, 12, 18]
+        idx = min(range(len(horas_ncep)), key=lambda i: abs(horas_ncep[i] - hora_decimal))
+        return horas_ncep[idx]
     
-    def descargar_viento_era5(
+    def descargar_viento_ncep(
         self,
         lat: float,
         lon: float,
@@ -124,115 +135,141 @@ class ERA5Downloader:
         altura_volcan: float = DEFAULT_ALTITUDE_M
     ) -> Optional[Dict]:
         """
-        Descarga datos de viento de ERA5 para una ubicación y fecha.
+        Descarga datos de viento de NCEP/NCAR Reanalysis 1 via OPeNDAP.
         
-        ERA5 tiene resolución 0.25° y horaria, mucho más preciso que NCEP (2.5°, 6h).
+        MISMA FUENTE que el MATLAB del profesor.
+        Resolución: 2.5° x 2.5°, 6 horas.
         """
+        import concurrent.futures
+        
         try:
-            import cdsapi
+            hora_cercana = self._hora_ncep_mas_cercana(fecha)
+            year = fecha.year
             
-            hora = self._hora_mas_cercana(fecha)
+            logger.info(f"Descargando vientos NCEP para {fecha.strftime('%Y-%m-%d')} {hora_cercana:02d}:00 UTC")
             
-            logger.info(f"Descargando vientos ERA5 para {fecha.strftime('%Y-%m-%d')} {hora}")
+            # Archivo cache local
+            fname = self.wind_dir / f"ncep_{fecha.strftime('%Y%m%d')}_{hora_cercana:02d}00.nc"
             
-            # Crear área pequeña alrededor del punto (0.5° margen)
-            margen = 0.5
-            area = [
-                lat + margen,   # Norte
-                lon - margen,   # Oeste
-                lat - margen,   # Sur
-                lon + margen    # Este
-            ]
-            
-            # Archivo temporal con cache
-            fname = self.wind_dir / f"era5_{fecha.strftime('%Y%m%d')}_{hora.replace(':','')}.nc"
-            
-            # Descargar si no existe (cache)
             if not fname.exists():
-                c = cdsapi.Client()
-                c.retrieve('reanalysis-era5-pressure-levels', {
-                    'product_type': 'reanalysis',
-                    'variable': ['u_component_of_wind', 'v_component_of_wind'],
-                    'pressure_level': ERA5_PRESSURE_LEVELS,
-                    'year': str(fecha.year),
-                    'month': f"{fecha.month:02d}",
-                    'day': f"{fecha.day:02d}",
-                    'time': hora,
-                    'area': area,
-                    'format': 'netcdf'
-                }, str(fname))
-                logger.info(f"Archivo ERA5 descargado: {fname}")
+                def _descargar():
+                    # URLs OPeNDAP para uwnd y vwnd
+                    uwnd_url = f"{NCEP_OPENDAP_BASE}/pressure/uwnd.{year}.nc"
+                    vwnd_url = f"{NCEP_OPENDAP_BASE}/pressure/vwnd.{year}.nc"
+                    
+                    logger.info(f"Conectando a NCEP OPeNDAP: uwnd.{year}.nc")
+                    
+                    # Abrir datasets remotos
+                    ds_u = xr.open_dataset(uwnd_url, engine='netcdf4')
+                    ds_v = xr.open_dataset(vwnd_url, engine='netcdf4')
+                    
+                    # Encontrar el punto más cercano en la grilla NCEP
+                    # NCEP usa longitudes 0-360, convertir si es negativa
+                    lon_ncep = lon if lon >= 0 else lon + 360
+                    
+                    # Buscar la fecha/hora más cercana
+                    target_time = datetime(fecha.year, fecha.month, fecha.day, hora_cercana)
+                    
+                    # Seleccionar datos: punto más cercano + tiempo más cercano
+                    u_data = ds_u['uwnd'].sel(
+                        lat=lat, lon=lon_ncep, time=target_time,
+                        method='nearest'
+                    )
+                    v_data = ds_v['vwnd'].sel(
+                        lat=lat, lon=lon_ncep, time=target_time,
+                        method='nearest'
+                    )
+                    
+                    # Descargar a memoria (esto es lo que tarda)
+                    u_values = u_data.values
+                    v_values = v_data.values
+                    levels = ds_u['level'].values
+                    
+                    ds_u.close()
+                    ds_v.close()
+                    
+                    # Guardar cache local
+                    ds_local = xr.Dataset({
+                        'uwnd': (['level'], u_values),
+                        'vwnd': (['level'], v_values),
+                    }, coords={'level': levels})
+                    ds_local.to_netcdf(str(fname))
+                    ds_local.close()
+                    
+                    logger.info(f"Datos NCEP guardados en cache: {fname}")
+                
+                # Ejecutar con timeout de 120 segundos
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(_descargar)
+                    try:
+                        future.result(timeout=120)
+                    except concurrent.futures.TimeoutError:
+                        logger.error("Timeout (120s) descargando NCEP — servidor NOAA no respondió")
+                        if fname.exists():
+                            fname.unlink()
+                        return None
             else:
-                logger.info(f"Usando cache ERA5: {fname}")
+                logger.info(f"Usando cache NCEP: {fname}")
             
-            # Leer datos
-            ds = xr.open_dataset(fname)
+            # Leer datos del cache
+            ds = xr.open_dataset(str(fname))
+            u_values = ds['uwnd'].values
+            v_values = ds['vwnd'].values
+            levels = ds['level'].values
+            ds.close()
             
-            # Seleccionar punto más cercano y aplanar dimensiones extra
-            u_data = ds['u'].sel(latitude=lat, longitude=lon, method='nearest').squeeze()
-            v_data = ds['v'].sel(latitude=lat, longitude=lon, method='nearest').squeeze()
-            
-            # Obtener niveles de presión
-            levels_disponibles = ds.pressure_level.values
-            logger.info(f"Niveles disponibles en ERA5: {list(levels_disponibles.astype(int))}")
+            logger.info(f"Niveles de presión NCEP: {list(levels.astype(int))}")
             
             # Construir datos de viento para cada altura
             datos_viento = []
             alturas_validas = self._obtener_alturas_validas(altura_volcan)
-            logger.info(f"Alturas válidas: {alturas_validas}")
+            logger.info(f"Alturas disponibles: {alturas_validas}")
             
-            for level in levels_disponibles:
+            for i, level in enumerate(levels):
                 level_int = int(level)
-                altura = PRESSURE_TO_HEIGHT.get(level_int, None)
+                altura = NCEP_PRESSURE_TO_HEIGHT.get(level_int, None)
                 
                 if altura is None:
                     continue
-                    
+                
                 if altura not in alturas_validas:
                     continue
                 
                 try:
-                    u = float(u_data.sel(pressure_level=level).values.item())
-                    v = float(v_data.sel(pressure_level=level).values.item())
-                except Exception:
+                    u = float(u_values[i])
+                    v = float(v_values[i])
+                except (IndexError, ValueError):
                     logger.warning(f"No se pudo obtener viento para nivel {level_int} hPa")
                     continue
                 
                 velocidad, dir_matematica = self._calcular_direccion_viento_matlab(u, v)
                 
                 datos_viento.append({
-                    'altura_m': altura,
                     'nivel_presion_hpa': level_int,
-                    'u_component': u,
-                    'v_component': v,
+                    'altura_m': altura,
+                    'u': u,
+                    'v': v,
                     'velocidad_ms': velocidad,
                     'direccion_matematica': dir_matematica,
                 })
             
-            ds.close()
-            
-            if not datos_viento:
-                logger.warning("No se encontraron datos de viento en alturas válidas")
-                return None
-            
-            # Ordenar por altura
-            datos_viento.sort(key=lambda x: x['altura_m'])
-            
-            logger.info(f"Vientos ERA5 obtenidos para {len(datos_viento)} alturas:")
-            for v in datos_viento:
-                logger.info(f"  {v['altura_m']:>5}m ({v['nivel_presion_hpa']:>4}hPa): "
-                           f"{v['velocidad_ms']:>5.1f} m/s, dir_mat={v['direccion_matematica']:>6.1f}°")
+            if datos_viento:
+                logger.info(f"Vientos NCEP obtenidos para {len(datos_viento)} alturas:")
+                for v in datos_viento:
+                    logger.info(f"  {v['altura_m']:>6}m ({v['nivel_presion_hpa']:>4}hPa): "
+                               f"{v['velocidad_ms']:>5.1f} m/s, dir_mat={v['direccion_matematica']:>6.1f}°")
             
             return {
                 'fecha': fecha,
                 'lat': lat,
                 'lon': lon,
-                'altura_volcan': altura_volcan,
+                'fuente': 'NCEP_Reanalysis_1',
+                'hora_utc': hora_cercana,
                 'vientos_por_altura': datos_viento
             }
             
         except Exception as e:
-            logger.error(f"Error descargando vientos ERA5: {e}")
+            logger.error(f"Error descargando vientos NCEP: {e}")
             import traceback
             traceback.print_exc()
             return None
@@ -248,6 +285,9 @@ class ERA5Downloader:
         
         MÉTODO EXACTO DEL MATLAB (línea 533):
             [valW, idxW] = min(abs(temp - PlumeAzMat));
+        
+        temp = dirección del viento (HACIA donde sopla) en coordenadas matemáticas
+        PlumeAzMat = azimut de la pluma en coordenadas matemáticas
         """
         if not datos_viento or 'vientos_por_altura' not in datos_viento:
             return None
@@ -262,7 +302,8 @@ class ERA5Downloader:
         
         logger.info(f"Azimut pluma: {azimut_pluma:.1f}° geográfico = {plume_az_mat:.1f}° matemático")
         
-        # Buscar la altura con menor diferencia
+        # MATLAB línea 533: [valW,idxW]=min(abs(temp-PlumeAzMat));
+        # Compara directamente — sin inversión.
         mejor_match = None
         menor_diferencia = float('inf')
         
@@ -315,18 +356,19 @@ class ERA5Downloader:
                 longitud=datos_viento['lon'],
                 nivel_presion_hpa=altura_seleccionada.get('nivel_presion_hpa'),
                 altitud_m=altura_seleccionada.get('altura_m'),
-                u_component=altura_seleccionada.get('u_component'),
-                v_component=altura_seleccionada.get('v_component'),
+                u_component=altura_seleccionada.get('u'),
+                v_component=altura_seleccionada.get('v'),
                 velocidad_ms=altura_seleccionada.get('velocidad_ms'),
-                direccion_grados=altura_seleccionada.get('azimut_grados'),
-                fuente="ERA5"
+                direccion_grados=altura_seleccionada.get('azimut_grados', 
+                                                          altura_seleccionada.get('direccion_matematica')),
+                fuente=datos_viento.get('fuente', 'NCEP_Reanalysis_1')
             )
             
             session.add(registro)
             session.commit()
             
             registro_id = registro.id
-            logger.info(f"Datos de viento ERA5 guardados con ID {registro_id}")
+            logger.info(f"Datos de viento NCEP guardados con ID {registro_id}")
             
             return registro_id
             
@@ -339,8 +381,7 @@ class ERA5Downloader:
             session.close()
 
 
-# Mantener compatibilidad - misma función que antes
-# El import en main.py es: from etl.ncep_downloader import obtener_viento_para_imagen
+# Función principal compatible con main.py
 def obtener_viento_para_imagen(
     volcan_id: int,
     lat: float,
@@ -351,14 +392,14 @@ def obtener_viento_para_imagen(
 ) -> Optional[Dict]:
     """
     Función principal para obtener datos de viento para una imagen TROPOMI.
-    Usa ERA5 como fuente de datos (reemplaza NCEP para mayor precisión).
+    Usa NCEP/NCAR Reanalysis 1 (misma fuente que el MATLAB del profesor).
     
     IMPORTANTE: El azimut_pluma debe ser en coordenadas GEOGRÁFICAS (0°=Norte, 90°=Este).
     """
-    downloader = ERA5Downloader()
+    downloader = NCEPDownloader()
     
-    # Descargar datos de viento
-    datos = downloader.descargar_viento_era5(
+    # Descargar datos de viento de NCEP
+    datos = downloader.descargar_viento_ncep(
         lat=lat,
         lon=lon,
         fecha=fecha,
@@ -366,7 +407,7 @@ def obtener_viento_para_imagen(
     )
     
     if not datos:
-        logger.warning("No se pudieron descargar datos de viento ERA5")
+        logger.warning("No se pudieron descargar datos de viento NCEP")
         return None
     
     # Seleccionar altura basada en azimut de la pluma
@@ -378,17 +419,21 @@ def obtener_viento_para_imagen(
         logger.warning("No se proporcionó azimut de pluma, usando primera altura")
         viento_seleccionado = datos['vientos_por_altura'][0] if datos['vientos_por_altura'] else None
     
-    if viento_seleccionado:
-        # Guardar en base de datos
-        downloader.guardar_datos_viento(volcan_id, datos, viento_seleccionado)
-        
-        return {
-            'velocidad_ms': viento_seleccionado['velocidad_ms'],
-            'direccion_grados': viento_seleccionado.get('azimut_grados', viento_seleccionado['direccion_matematica']),
-            'altura_m': viento_seleccionado['altura_m'],
-            'nivel_presion_hpa': viento_seleccionado['nivel_presion_hpa'],
-            'u_component': viento_seleccionado['u_component'],
-            'v_component': viento_seleccionado['v_component']
-        }
+    if not viento_seleccionado:
+        logger.warning("No se pudo seleccionar viento por azimut")
+        return None
     
-    return None
+    # Guardar en base de datos
+    downloader.guardar_datos_viento(
+        volcan_id=volcan_id,
+        datos_viento=datos,
+        altura_seleccionada=viento_seleccionado
+    )
+    
+    return {
+        'velocidad_ms': viento_seleccionado['velocidad_ms'],
+        'direccion_grados': viento_seleccionado.get('azimut_grados', viento_seleccionado['direccion_matematica']),
+        'altura_m': viento_seleccionado['altura_m'],
+        'nivel_presion_hpa': viento_seleccionado.get('nivel_presion_hpa'),
+        'fuente': 'NCEP_Reanalysis_1'
+    }

@@ -2,7 +2,7 @@
 API REST para el sistema de monitoreo de SO2
 Implementada con FastAPI
 """
-from fastapi import FastAPI, HTTPException, Query, Depends
+from fastapi import FastAPI, HTTPException, Query, Depends, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -900,6 +900,10 @@ def procesar_geotiff(
         processor.cerrar()
         
         if not resultado_calculo.get('exito'):
+            # Marcar como procesada aunque no haya resultado válido
+            imagen.procesado = True
+            imagen.fecha_procesamiento = datetime.utcnow()
+            session.commit()
             return {
                 "mensaje": "No se pudo calcular flujo",
                 "imagen_id": imagen_id,
@@ -963,10 +967,13 @@ def procesar_lote_geotiff(
     volcan_id: int = Query(...),
     fecha_inicio: Optional[datetime] = Query(None),
     fecha_fin: Optional[datetime] = Query(None),
+    background_tasks: BackgroundTasks = None,
     session = Depends(get_db)
 ):
     """
-    Procesa múltiples imágenes GeoTIFF de un volcán.
+    Procesa múltiples imágenes GeoTIFF de un volcán en segundo plano.
+    No bloquea el request HTTP — devuelve inmediatamente y procesa en background.
+    Consultar progreso en GET /api/gee/progreso-lote
     """
     # Buscar imágenes GeoTIFF pendientes
     query = session.query(ImagenTROPOMI).filter(
@@ -986,32 +993,71 @@ def procesar_lote_geotiff(
     if not imagenes:
         return {"mensaje": "No hay imágenes GeoTIFF pendientes", "n_imagenes": 0}
     
-    resultados = []
-    errores = []
+    imagen_ids = [img.id for img in imagenes]
     
-    for img in imagenes:
+    # Resetear progreso
+    _progreso_lote['estado'] = 'procesando'
+    _progreso_lote['total'] = len(imagen_ids)
+    _progreso_lote['procesadas'] = 0
+    _progreso_lote['exitos'] = 0
+    _progreso_lote['errores'] = 0
+    _progreso_lote['detalle'] = []
+    
+    # Lanzar procesamiento en background
+    background_tasks.add_task(_procesar_lote_background, imagen_ids)
+    
+    return {
+        "mensaje": f"Procesamiento iniciado para {len(imagen_ids)} imágenes en segundo plano",
+        "n_imagenes": len(imagen_ids),
+        "consultar_progreso": "/api/gee/progreso-lote"
+    }
+
+
+# Estado global del procesamiento en lote
+_progreso_lote = {
+    'estado': 'idle',
+    'total': 0,
+    'procesadas': 0,
+    'exitos': 0,
+    'errores': 0,
+    'detalle': []
+}
+
+
+def _procesar_lote_background(imagen_ids: List[int]):
+    """Procesa imágenes en background, una por una"""
+    from database import get_session as get_bg_session
+    
+    for img_id in imagen_ids:
+        bg_session = get_bg_session()
         try:
-            # Llamar al endpoint individual (reutilizar lógica)
-            # En producción podrías usar un worker async
-            resultado = procesar_geotiff(img.id, session=session)
-            resultados.append({
-                "imagen_id": img.id,
+            resultado = procesar_geotiff(img_id, session=bg_session)
+            _progreso_lote['exitos'] += 1
+            _progreso_lote['detalle'].append({
+                "imagen_id": img_id,
                 "exito": True,
                 "flujo_ton_dia": resultado.get('resultado', {}).get('flujo_ton_dia')
             })
         except Exception as e:
-            errores.append({
-                "imagen_id": img.id,
+            _progreso_lote['errores'] += 1
+            _progreso_lote['detalle'].append({
+                "imagen_id": img_id,
+                "exito": False,
                 "error": str(e)
             })
+            logger.error(f"Error procesando imagen {img_id}: {e}")
+        finally:
+            bg_session.close()
+            _progreso_lote['procesadas'] += 1
     
-    return {
-        "mensaje": f"Procesamiento completado: {len(resultados)} éxitos, {len(errores)} errores",
-        "n_procesadas": len(resultados),
-        "n_errores": len(errores),
-        "resultados": resultados,
-        "errores": errores
-    }
+    _progreso_lote['estado'] = 'completado'
+    logger.info(f"Lote completado: {_progreso_lote['exitos']} éxitos, {_progreso_lote['errores']} errores")
+
+
+@app.get("/api/gee/progreso-lote", tags=["Google Earth Engine"])
+def obtener_progreso_lote():
+    """Consulta el progreso del procesamiento en lote"""
+    return _progreso_lote
 
 
 @app.get("/api/gee/estado", tags=["Google Earth Engine"])

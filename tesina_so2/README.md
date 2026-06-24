@@ -1,261 +1,227 @@
-# Sistema de Monitoreo de Flujo de SO2 Volcánico
+# Monitor de Flujo SO₂ Volcánico
 
-Sistema para el procesamiento y generación de series temporales de flujo de dióxido de azufre (SO2) en volcanes, utilizando imágenes del satélite TROPOMI (Sentinel-5P) y datos de viento de NCEP Reanalysis.
+Sistema automatizado de monitoreo y cuantificación de dióxido de azufre (SO₂) volcánico mediante sensado remoto satelital.
 
-## 📋 Descripción
+Tesina de grado — Licenciatura en Informática, Universidad Nacional de Hurlingham (UNAHUR).
 
-Este software permite:
-- **Descargar** imágenes TROPOMI de SO2 desde Copernicus Data Space
-- **Obtener** datos de viento desde NCEP Reanalysis (NOAA)
-- **Calcular** el flujo de SO2 volcánico usando el método de 6 franjas horarias
-- **Visualizar** series temporales y estadísticas de emisiones
-- **Exportar** datos para análisis posterior
+**Autores:** Massey Florencia, Rodriguez Ayelén
+**Director:** Prof. Federico Carballo
 
-## 🏗️ Arquitectura
+---
+
+## Descripción
+
+Sistema web que automatiza el flujo completo de estimación de emisiones de SO₂ volcánico:
+
+1. **Descarga de imágenes TROPOMI** desde Google Earth Engine (producto L3 NRTI, 1km de resolución)
+2. **Descarga de datos de viento** desde ERA5 (Copernicus CDS API, resolución 0.25°, horaria)
+3. **Cálculo de flujo SO₂** mediante el método SO2 (cross-section method), replicando la metodología MATLAB del Prof. Carballo
+4. **Visualización de resultados** en interfaz web con series temporales, tablas y previews de imágenes satelitales
+
+## Caso de estudio
+
+Volcán **Sabancaya** (Perú, -15.78°, -71.85°, 5976 m), julio 2019. Validado contra resultados de referencia del Prof. Carballo.
+
+---
+
+## Stack tecnológico
+
+| Componente | Tecnología |
+|---|---|
+| Backend API | FastAPI (Python 3.11) |
+| Base de datos | PostgreSQL 15 |
+| Frontend | HTML5 + Bootstrap 5 + Chart.js + Leaflet |
+| Proxy reverso | Nginx |
+| Contenedores | Docker + Docker Compose |
+| Datos satelitales | Google Earth Engine API |
+| Datos de viento | ERA5 (CDS API - Copernicus) |
+| Procesamiento | NumPy, Rasterio, xarray, Matplotlib |
+
+## Arquitectura
+
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         ORÍGENES DE DATOS                          │
-│  ┌─────────────┐                          ┌─────────────┐          │
-│  │  TROPOMI    │                          │    NCEP     │          │
-│  │ (Copernicus)│                          │   (NOAA)    │          │
-│  └──────┬──────┘                          └──────┬──────┘          │
-└─────────┼────────────────────────────────────────┼──────────────────┘
-          │                                        │
-          ▼                                        ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                              ETL                                     │
-│  ┌────────────────────┐              ┌────────────────────┐         │
-│  │ tropomi_downloader │              │  ncep_downloader   │         │
-│  └─────────┬──────────┘              └──────────┬─────────┘         │
-│            │                                    │                    │
-│            └──────────────┬─────────────────────┘                   │
-│                           ▼                                          │
-│                  ┌─────────────────┐                                │
-│                  │ tropomi_processor│                               │
-│                  └────────┬────────┘                                │
-└───────────────────────────┼─────────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                        MESSAGE BUS                                   │
-│              ┌───────────────────────────┐                          │
-│              │       RabbitMQ            │                          │
-│              │  • CMD_CALCULOS_FINALES   │                          │
-│              │  • CMD_NUEVA_EXTRACCION   │                          │
-│              └───────────────────────────┘                          │
-└─────────────────────────────┬───────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                         CALCULADOR                                   │
-│              ┌───────────────────────────┐                          │
-│              │   Cálculo de Flujo SO2    │                          │
-│              │  (6 Franjas Horarias)     │                          │
-│              └─────────────┬─────────────┘                          │
-└────────────────────────────┼────────────────────────────────────────┘
-                             │
-                             ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                      BASE DE DATOS                                   │
-│              ┌───────────────────────────┐                          │
-│              │       PostgreSQL          │                          │
-│              │  • Volcanes               │                          │
-│              │  • Imágenes TROPOMI       │                          │
-│              │  • Datos de Viento        │                          │
-│              │  • Resultados Flujo       │                          │
-│              └───────────────────────────┘                          │
-└─────────────────────────────┬───────────────────────────────────────┘
-                              │
-              ┌───────────────┴───────────────┐
-              ▼                               ▼
-┌─────────────────────────┐     ┌─────────────────────────┐
-│       API REST          │     │        Jupyter          │
-│      (FastAPI)          │     │       Notebooks         │
-└───────────┬─────────────┘     └─────────────────────────┘
-            │
-            ▼
-┌─────────────────────────┐
-│       Frontend          │
-│   (HTML/CSS/JS)         │
-└─────────────────────────┘
+┌─────────────┐     ┌──────────────┐     ┌──────────────┐
+│   Frontend   │────▶│    Nginx     │────▶│   FastAPI    │
+│  (HTML/JS)   │     │  (proxy)     │     │   (API)      │
+└─────────────┘     └──────────────┘     └──────┬───────┘
+                                                 │
+                         ┌───────────────────────┼───────────────────────┐
+                         │                       │                       │
+                    ┌────▼─────┐          ┌──────▼──────┐        ┌──────▼──────┐
+                    │ Google   │          │    ERA5     │        │ PostgreSQL  │
+                    │ Earth    │          │  (CDS API)  │        │    (DB)     │
+                    │ Engine   │          │   Vientos   │        │             │
+                    │ TROPOMI  │          └─────────────┘        └─────────────┘
+                    └──────────┘
 ```
 
-## 🚀 Instalación
+---
 
-### Requisitos Previos
+## Requisitos previos
 
-- Docker y Docker Compose
-- Python 3.11+ (para desarrollo local)
-- Cuenta en Copernicus Data Space: https://dataspace.copernicus.eu/
+- **Docker** y **Docker Compose**
+- **Cuenta Google Earth Engine** autenticada (`earthengine authenticate`)
+- **Cuenta CDS (Copernicus)** con API key para ERA5
 
-### Configuración
+## Instalación
 
-1. **Clonar o descargar el proyecto**
+### 1. Clonar el repositorio
+
 ```bash
+git clone <url-del-repositorio>
 cd tesina_so2
 ```
 
-2. **Configurar credenciales**
-```bash
-# Copiar archivo de ejemplo
-cp .env.example .env
+### 2. Configurar credenciales
 
-# Editar con tus credenciales de Copernicus
-nano .env
+**Google Earth Engine:**
+```bash
+earthengine authenticate
 ```
+Las credenciales se guardan en `~/.config/earthengine/` y se montan al container.
 
-### Iniciar con Docker
+**ERA5 (CDS API):**
+Crear archivo `.cdsapirc` en la raíz del proyecto:
+```
+url: https://cds.climate.copernicus.eu/api
+key: TU_API_KEY_AQUI
+```
+Obtener la key en: https://cds.climate.copernicus.eu/
+
+### 3. Levantar los servicios
+
 ```bash
-# Construir e iniciar todos los servicios
+docker-compose build
 docker-compose up -d
-
-# Ver logs
-docker-compose logs -f
-
-# Detener
-docker-compose down
 ```
 
-### Acceso a los servicios
+### 4. Crear credenciales CDS dentro del container
 
-| Servicio | URL | Descripción |
-|----------|-----|-------------|
-| Frontend | http://localhost | Interfaz web |
-| API REST | http://localhost:8000/docs | Documentación Swagger |
-| RabbitMQ | http://localhost:15672 | Panel de administración |
-| Jupyter | http://localhost:8888 | Notebooks de análisis |
-
-## 📖 Uso
-
-### 1. Agregar un volcán
-
-**Via API:**
-```python
-import requests
-
-volcan = {
-    "nombre": "Monte Etna",
-    "latitud": 37.751,
-    "longitud": 14.993,
-    "pais": "Italia",
-    "altitud_m": 3357
-}
-
-response = requests.post("http://localhost:8000/api/volcanes", json=volcan)
+```bash
+docker exec so2_api bash -c "echo 'url: https://cds.climate.copernicus.eu/api
+key: TU_API_KEY_AQUI' > /root/.cdsapirc"
 ```
 
-**Via Frontend:**
-- Ir a la pestaña "Volcanes"
-- Seleccionar de la lista predefinida o ingresar manualmente
-- Clic en "Agregar"
+### 5. Acceder al sistema
 
-### 2. Iniciar extracción de datos
+Abrir http://localhost en el navegador.
 
-**Via API:**
-```python
-extraccion = {
-    "volcan_id": 1,
-    "fecha_inicio": "2024-01-01",
-    "fecha_fin": "2024-01-07"
-}
+---
 
-response = requests.post("http://localhost:8000/api/extraccion/iniciar", json=extraccion)
+## Uso
+
+### Agregar un volcán
+
+1. Ir a la pestaña **Volcanes**
+2. Seleccionar un volcán predefinido (Sabancaya, Copahue, Etna, Villarrica) o ingresar datos manualmente
+3. Click en **Agregar**
+
+### Descargar imágenes TROPOMI
+
+1. Ir a la pestaña **Extracción**
+2. Seleccionar el volcán y rango de fechas
+3. Click en **Descargar desde GEE**
+4. Las imágenes aparecen en la tabla con estado "Pend" (pendiente)
+
+### Procesar imágenes
+
+1. Con el volcán seleccionado, click en **Procesar Pendientes**
+2. El sistema ejecuta para cada imagen:
+   - Detección automática del azimut de pluma
+   - Descarga de viento ERA5 (se cachea por fecha)
+   - Cálculo de flujo SO₂ por franjas horarias
+3. Las imágenes pasan a estado "OK" al completarse
+
+### Ver resultados
+
+1. Ir a la pestaña **Resultados**
+2. Seleccionar volcán y rango de fechas → **Buscar**
+3. Vista **Día**: muestra flujo promedio diario
+4. Vista **Detalle**: muestra cada franja horaria con altitud, dirección y velocidad de viento
+5. Click en un resultado para ver el detalle con la imagen TROPOMI
+
+### Exportar datos
+
+Click en **CSV** para descargar los resultados en formato CSV.
+
+---
+
+## Método SO2
+
+El sistema implementa el método de corte transversal de pluma (cross-section method) para estimar el flujo de SO₂:
+
+**Fórmula principal:**
+```
+Flujo (kg/s) = SO₂_max (kg/m²) × Distancia (m) × Velocidad_viento (m/s)
 ```
 
-### 3. Consultar resultados
-```python
-# Obtener resultados
-resultados = requests.get("http://localhost:8000/api/resultados?volcan_id=1")
-datos = resultados.json()
-```
+**Conversión de unidades:**
+- mol/m² → g/m²: multiplicar por 64.1025 (1/0.0156)
+- g/m² → kg/m²: multiplicar por 0.001
+- kg/s → t/d: multiplicar por 86.4
 
-## 📁 Estructura del Proyecto
+**Franjas horarias:** 0.5, 1.0, 1.5, 2.0, 2.5, 3.0 horas
+
+El resultado final es el promedio de los flujos de todas las franjas válidas.
+
+**Detección de pluma:** Se busca el máximo de SO₂ a 60 km del cráter para determinar automáticamente la dirección de la pluma.
+
+**Selección de altura de viento:** Se selecciona el nivel de presión cuya dirección de viento mejor coincide con el azimut de la pluma detectada, entre 1500 m y 12000 m de altitud.
+
+---
+
+## Estructura del proyecto
+
 ```
 tesina_so2/
-├── api/                    # API REST (FastAPI)
+├── api/
 │   ├── __init__.py
-│   └── main.py
-├── calculador/             # Módulo de cálculo de flujo
+│   └── main.py              # API REST (FastAPI)
+├── etl/
 │   ├── __init__.py
-│   └── flujo_so2.py
-├── config/                 # Configuración
+│   ├── gee_tropomi_downloader.py  # Descarga TROPOMI desde GEE
+│   ├── geotiff_processor.py       # Procesamiento SO2
+│   └── ncep_downloader.py         # Descarga viento ERA5 (nombre legacy)
+├── database/
 │   ├── __init__.py
-│   └── settings.py
-├── database/               # Modelos de base de datos
-│   ├── __init__.py
-│   └── models.py
-├── etl/                    # Extracción y procesamiento
-│   ├── __init__.py
-│   ├── tropomi_downloader.py
-│   ├── tropomi_processor.py
-│   └── ncep_downloader.py
-├── frontend/               # Interfaz web
-│   └── index.html
-├── message_bus/            # Sistema de mensajería
-│   ├── __init__.py
-│   └── message_bus.py
-├── notebooks/              # Jupyter notebooks
-├── docker-compose.yml      # Orquestación Docker
-├── Dockerfile.api          # Imagen Docker API
-├── Dockerfile.worker       # Imagen Docker Workers
-├── Dockerfile.jupyter      # Imagen Docker Jupyter
-├── nginx.conf              # Configuración Nginx
-├── requirements.txt        # Dependencias Python
-├── .env.example            # Ejemplo de configuración
-└── README.md               # Este archivo
+│   └── models.py             # Modelos SQLAlchemy
+├── config/
+│   └── settings.py           # Configuración y constantes
+├── frontend/
+│   └── index.html            # Interfaz web
+├── data/
+│   ├── images/               # Imágenes GeoTIFF descargadas
+│   └── wind/                 # Datos de viento ERA5 (cache)
+├── docker-compose.yml
+├── Dockerfile.api
+├── nginx.conf
+├── requirements.txt
+└── README.md
 ```
 
-## 🔬 Metodología de Cálculo
+## Fuentes de datos
 
-El flujo de SO2 se calcula usando el método de 6 franjas horarias:
+### Imágenes TROPOMI
+- **Colección:** `COPERNICUS/S5P/NRTI/L3_SO2`
+- **Variable:** `SO2_column_number_density` (VCD, mol/m²)
+- **Resolución:** 1000 m
+- **Plataforma:** Google Earth Engine
 
-### Franjas Horarias
+### Viento atmosférico
+- **Dataset:** ERA5 Reanalysis (pressure levels)
+- **Variables:** `u_component_of_wind`, `v_component_of_wind`
+- **Resolución espacial:** 0.25°
+- **Resolución temporal:** horaria
+- **Niveles de presión:** 19 niveles (1000 a 200 hPa)
+- **Plataforma:** Copernicus CDS API
 
-El método analiza la pluma de SO2 en 6 franjas que representan el tiempo de viaje del gas desde el volcán:
+---
 
-| Franja | Representa |
-|--------|------------|
-| F 0.5h | SO2 emitido hace 30 minutos |
-| F 1h | SO2 emitido hace 1 hora |
-| F 1.5h | SO2 emitido hace 1.5 horas |
-| F 2h | SO2 emitido hace 2 horas |
-| F 2.5h | SO2 emitido hace 2.5 horas |
-| F 3h | SO2 emitido hace 3 horas |
+## Notas importantes
 
-### Fórmula
-```
-Flujo (kg/s) = SO2_max (kg/m²) × distancia (m) × velocidad_viento (m/s)
-Flujo (ton/día) = Flujo (kg/s) × 86.4
-```
-
-### Conversión de Unidades
-```
-SO2 (g/m²) = SO2 (mol/m²) / 0.0156
-SO2 (kg/m²) = SO2 (g/m²) × 0.001
-```
-
-### Pasos del cálculo:
-
-1. **Detección de pluma**: Buscar el máximo de SO2 a ~60km del volcán para determinar el azimut
-2. **Selección de viento**: Buscar la altura (1500-10000m) donde la dirección del viento coincide con el azimut de la pluma
-3. **Cálculo por franjas**: Para cada franja horaria, buscar el máximo de SO2 y calcular el flujo
-4. **Promedio**: El flujo final es el promedio de las franjas válidas
-
-## 📚 Referencias
-
-- Theys, N., et al. (2017). Sulfur dioxide retrievals from TROPOMI. *Atmos. Meas. Tech.*
-- Merucci, L., et al. (2011). Reconstruction of SO2 flux emission chronology. *J. Volcanol. Geotherm. Res.*
-- Queißer, M., et al. (2019). TROPOMI enables high resolution SO2 flux observations. *Scientific Reports*
-
-## 👥 Autores
-
-- Ayelen Caterina Rodriguez Cardozo
-- Patricia Florencia Massey
-**Directores:**
-- Federico Carballo
-- Ricardo Cesar Jose Brea
-
-**Institución:** Universidad Nacional de Hurlingham (UNAHUR)
+- El archivo `.cdsapirc` debe recrearse dentro del container después de cada `docker-compose build` o recreación del container.
+- La primera descarga de viento ERA5 para una fecha nueva tarda ~30 segundos (descarga del servidor CDS). Las siguientes consultas para la misma fecha usan caché local.
+- La detección automática de pluma funciona mejor en días con emisiones claras y visibles. En días de baja actividad, puede no detectar pluma.
 
 ## 📄 Licencia
 

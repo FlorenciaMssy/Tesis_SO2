@@ -86,9 +86,12 @@
                             <div class="card-body p-0"><div id="map"></div></div>
                         </div>
                         <div class="card">
-                            <div class="card-header">
-                                <i class="bi bi-graph-up"></i> Serie Temporal
-                                <select class="form-select form-select-sm d-inline-block w-auto ms-2" id="volcanDashboard"></select>
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <div>
+                                    <i class="bi bi-graph-up"></i> Serie Temporal
+                                    <select class="form-select form-select-sm d-inline-block w-auto ms-2" id="volcanDashboard"></select>
+                                </div>
+                                <button class="btn btn-sm btn-outline-secondary" onclick="descargarGraficoDashboard()" title="Descargar gráfico"><i class="bi bi-download"></i> PNG</button>
                             </div>
                             <div class="card-body"><canvas id="chartDashboard" height="120"></canvas></div>
                         </div>
@@ -100,8 +103,16 @@
                                 <div class="row text-center">
                                     <div class="col-6 mb-3"><div class="stat-value" id="statVolcanes">0</div><div class="stat-label">Volcanes</div></div>
                                     <div class="col-6 mb-3"><div class="stat-value" id="statImagenes">0</div><div class="stat-label">Imágenes</div></div>
-                                    <div class="col-6"><div class="stat-value" id="statResultados">0</div><div class="stat-label">Mediciones</div></div>
-                                    <div class="col-6"><div class="stat-value" id="statUltimo">-</div><div class="stat-label">Último (t/d)</div></div>
+                                    <div class="col-6 mb-3"><div class="stat-value" id="statResultados">0</div><div class="stat-label">Mediciones</div></div>
+                                    <div class="col-6 mb-3"><div class="stat-value" id="statUltimo">-</div><div class="stat-label">Último (t/d)</div></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card">
+                            <div class="card-header"><i class="bi bi-activity"></i> Actividad Reciente</div>
+                            <div class="card-body p-0">
+                                <div id="actividadReciente" class="small" style="max-height:200px;overflow-y:auto;padding:10px;">
+                                    <p class="text-muted text-center mb-0">Cargando...</p>
                                 </div>
                             </div>
                         </div>
@@ -169,7 +180,7 @@
                             </div>
                             <div class="card-body" style="max-height: 500px; overflow-y: auto;">
                                 <table class="table table-hover table-sm" id="tablaImagenes">
-                                    <thead><tr><th><input type="checkbox" id="checkAllImg"></th><th>ID</th><th>Fecha</th><th>Volcán</th><th>Estado</th><th></th></tr></thead>
+                                    <thead><tr><th><input type="checkbox" id="checkAllImg"></th><th>#</th><th>Fecha</th><th>Volcán</th><th>Estado</th><th></th></tr></thead>
                                     <tbody></tbody>
                                 </table>
                             </div>
@@ -232,7 +243,10 @@
                     </div>
                 </div>
                 <div class="card">
-                    <div class="card-header"><i class="bi bi-graph-up"></i> Serie Temporal</div>
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span><i class="bi bi-graph-up"></i> Serie Temporal</span>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="descargarGraficoResultados()" title="Descargar gráfico"><i class="bi bi-download"></i> PNG</button>
+                    </div>
                     <div class="card-body"><canvas id="chartResultados" height="80"></canvas></div>
                 </div>
             </div>
@@ -423,10 +437,13 @@
             const fv = document.getElementById('filtroVolcanImg').value;
             if(fv) lista = lista.filter(i => i.volcan_id == fv);
             document.getElementById('contadorImg').textContent = lista.length;
-            document.querySelector('#tablaImagenes tbody').innerHTML = lista.map(i => {
+            // Preservar checkboxes seleccionados antes de re-renderizar
+            const checkedIds = new Set([...document.querySelectorAll('.img-check:checked')].map(c => c.value));
+            document.querySelector('#tablaImagenes tbody').innerHTML = lista.map((i, idx) => {
                 const v = volcanes.find(x=>x.id===i.volcan_id);
                 const estado = i.procesado ? '<span class="badge bg-success">OK</span>' : i.descargado ? '<span class="badge bg-warning">Pend</span>' : '<span class="badge bg-secondary">-</span>';
-                return `<tr><td><input type="checkbox" class="img-check" value="${i.id}"></td><td>${i.id}</td><td>${new Date(i.fecha_adquisicion).toLocaleDateString('es-AR')}</td><td>${v?.nombre||'-'}</td><td>${estado}</td><td>${i.descargado && !i.procesado ? `<button class="btn btn-sm btn-primary" onclick="procesarImagen(${i.id})"><i class="bi bi-gear"></i></button>`:''}<button class="btn btn-sm btn-outline-danger ms-1" onclick="borrarImagen(${i.id})"><i class="bi bi-trash"></i></button></td></tr>`;
+                const checked = checkedIds.has(String(i.id)) ? ' checked' : '';
+                return `<tr><td><input type="checkbox" class="img-check" value="${i.id}"${checked}></td><td>${idx + 1}</td><td>${new Date(i.fecha_adquisicion).toLocaleDateString('es-AR')}</td><td>${v?.nombre||'-'}</td><td>${estado}</td><td>${i.descargado && !i.procesado ? `<button class="btn btn-sm btn-primary" onclick="procesarImagen(${i.id})"><i class="bi bi-gear"></i></button>`:''}<button class="btn btn-sm btn-outline-danger ms-1" onclick="borrarImagen(${i.id})"><i class="bi bi-trash"></i></button></td></tr>`;
             }).join('');
         }
 
@@ -460,14 +477,26 @@
             const vid = document.getElementById('volcanExtraccion').value;
             if(!vid) { showToast('Seleccioná un volcán', 'warning'); return; }
             const btn = document.getElementById('btnProcesarTodas');
-            btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Procesando...';
+            btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Iniciando...';
             try {
                 const res = await fetch(`${API}/gee/procesar-lote?volcan_id=${vid}`, {method:'POST'});
                 const data = await res.json();
-                showToast(data.mensaje || 'Procesamiento completado', 'success');
-                loadImagenes();
-            } catch(e) { showToast('Error de conexión', 'error'); }
-            btn.disabled = false; btn.innerHTML = '<i class="bi bi-play-fill"></i> Procesar Pendientes';
+                if(!data.n_imagenes) { showToast(data.mensaje, 'info'); btn.disabled = false; btn.innerHTML = '<i class="bi bi-play-fill"></i> Procesar Pendientes'; return; }
+                showToast(`Procesando ${data.n_imagenes} imágenes en segundo plano...`, 'info');
+                // Polling de progreso
+                const pollInterval = setInterval(async () => {
+                    try {
+                        const prog = await (await fetch(`${API}/gee/progreso-lote`)).json();
+                        btn.innerHTML = `<span class="spinner-border spinner-border-sm"></span> ${prog.procesadas}/${prog.total}...`;
+                        if(prog.estado === 'completado') {
+                            clearInterval(pollInterval);
+                            showToast(`Completado: ${prog.exitos} éxitos, ${prog.errores} errores`, prog.errores ? 'warning' : 'success');
+                            btn.disabled = false; btn.innerHTML = '<i class="bi bi-play-fill"></i> Procesar Pendientes';
+                            loadImagenes();
+                        }
+                    } catch(e) {}
+                }, 3000);
+            } catch(e) { showToast('Error de conexión', 'error'); btn.disabled = false; btn.innerHTML = '<i class="bi bi-play-fill"></i> Procesar Pendientes'; }
         }
 
         async function borrarImagen(id) { if(!confirm('¿Borrar?')) return; try { await fetch(`${API}/imagenes/${id}`, {method:'DELETE'}); loadImagenes(); } catch(e) {} }
@@ -543,18 +572,21 @@
             if (imgId) {
                 imagenHtml = `
                     <div class="label mt-3"><i class="bi bi-image"></i> Imagen TROPOMI</div>
-                    <div style="position:relative; margin-top:8px; border-radius:8px; overflow:hidden; border:1px solid #333;">
+                    <div style="position:relative; margin-top:8px; border-radius:8px; overflow:hidden; border:1px solid #333; cursor:pointer;" onclick="abrirImagenCompleta(document.getElementById('previewImg').src)">
                         <img id="previewImg" src="${previewUrl}" 
                              alt="SO2 Preview" 
                              style="width:100%; display:block; background:#111;"
                              onerror="this.onerror=null; this.src='${previewSimpleUrl}'; if(!this.complete || this.naturalWidth===0) this.parentElement.innerHTML='<div style=\\'padding:20px;text-align:center;color:#666\\'>No se pudo cargar preview</div>';">
+                        <div style="position:absolute;top:6px;right:6px;background:rgba(0,0,0,0.6);border-radius:4px;padding:2px 8px;">
+                            <small style="color:#ccc;"><i class="bi bi-arrows-fullscreen"></i></small>
+                        </div>
                         <div style="position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,0.6);padding:4px 8px;display:flex;justify-content:space-between;align-items:center;">
                             <small style="color:#aaa;">Imagen #${imgId}</small>
                             <div>
-                                <button class="btn btn-sm" style="color:#00d9ff;padding:2px 6px;" onclick="cambiarColormap(${imgId}, ${r.id})" title="Cambiar colormap">
+                                <button class="btn btn-sm" style="color:#00d9ff;padding:2px 6px;" onclick="event.stopPropagation();cambiarColormap(${imgId}, ${r.id})" title="Cambiar colormap">
                                     <i class="bi bi-palette"></i>
                                 </button>
-                                <a href="${previewUrl}" target="_blank" class="btn btn-sm" style="color:#00d9ff;padding:2px 6px;" title="Abrir en nueva pestaña">
+                                <a href="${previewUrl}" target="_blank" class="btn btn-sm" style="color:#00d9ff;padding:2px 6px;" title="Abrir en nueva pestaña" onclick="event.stopPropagation();">
                                     <i class="bi bi-box-arrow-up-right"></i>
                                 </a>
                             </div>
@@ -684,7 +716,55 @@
                 const all = await (await fetch(`${API}/resultados?limite=100`)).json();
                 document.getElementById('statResultados').textContent = all.length;
                 document.getElementById('statUltimo').textContent = all.length && all[0].flujo_so2_ton_dia ? all[0].flujo_so2_ton_dia.toFixed(0) : '-';
+                // Actividad reciente
+                const recienteDiv = document.getElementById('actividadReciente');
+                if(all.length) {
+                    const ultimos = all.slice(0, 5);
+                    recienteDiv.innerHTML = ultimos.map(r => {
+                        const v = volcanes.find(x=>x.id===r.volcan_id);
+                        const fecha = new Date(r.fecha_hora);
+                        const flujo = r.flujo_so2_ton_dia ? r.flujo_so2_ton_dia.toFixed(1) : '-';
+                        const color = r.flujo_so2_ton_dia > 5000 ? '#e74c3c' : r.flujo_so2_ton_dia > 1000 ? '#f39c12' : '#2ecc71';
+                        return `<div class="d-flex justify-content-between align-items-center py-1 border-bottom">
+                            <div><strong>${v?.nombre||'-'}</strong><br><small class="text-muted">${fecha.toLocaleDateString('es-AR')} ${fecha.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}</small></div>
+                            <span class="badge" style="background:${color};font-size:0.85em;">${flujo} t/d</span>
+                        </div>`;
+                    }).join('');
+                } else {
+                    recienteDiv.innerHTML = '<p class="text-muted text-center mb-0">Sin mediciones</p>';
+                }
             } catch(e) {}
+        }
+
+        function descargarGraficoDashboard() {
+            const canvas = document.getElementById('chartDashboard');
+            const link = document.createElement('a');
+            link.download = `SO2_serie_temporal_${new Date().toISOString().split('T')[0]}.png`;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        }
+
+        function descargarGraficoResultados() {
+            const canvas = document.getElementById('chartResultados');
+            const link = document.createElement('a');
+            link.download = `SO2_resultados_${new Date().toISOString().split('T')[0]}.png`;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        }
+
+        function abrirImagenCompleta(src) {
+            const modal = document.createElement('div');
+            modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.9);z-index:9999;display:flex;align-items:center;justify-content:center;cursor:pointer;';
+            modal.onclick = () => modal.remove();
+            const img = document.createElement('img');
+            img.src = src;
+            img.style.cssText = 'max-width:90%;max-height:90%;border-radius:8px;box-shadow:0 0 30px rgba(0,0,0,0.5);';
+            const closeBtn = document.createElement('div');
+            closeBtn.innerHTML = '<i class="bi bi-x-lg" style="font-size:24px;color:white;"></i>';
+            closeBtn.style.cssText = 'position:absolute;top:20px;right:20px;cursor:pointer;';
+            modal.appendChild(img);
+            modal.appendChild(closeBtn);
+            document.body.appendChild(modal);
         }
     </script>
 </body>

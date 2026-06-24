@@ -70,6 +70,8 @@ services:
       - ./data:/app/data
       # Credenciales de Google Earth Engine
       - C:/Users/julia/.config/earthengine:/root/.config/earthengine:ro
+       # Credenciales de ERA5/Copernicus
+      - ./.cdsapirc:/root/.cdsapirc:ro
     networks:
       - so2_network
 
@@ -178,6 +180,7 @@ services:
 volumes:
   postgres_data:
   rabbitmq_data:
+  
 
 networks:
   so2_network:
