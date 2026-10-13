@@ -181,7 +181,7 @@ tesina_so2/
 │   ├── __init__.py
 │   ├── gee_tropomi_downloader.py  # Descarga TROPOMI desde GEE
 │   ├── geotiff_processor.py       # Procesamiento SO2
-│   └── ncep_downloader.py         # Descarga viento ERA5 (nombre legacy)
+│   └── era5_downloader.py         # Descarga viento ERA5
 ├── database/
 │   ├── __init__.py
 │   └── models.py             # Modelos SQLAlchemy

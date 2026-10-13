@@ -204,7 +204,7 @@ def listar_imagenes(
     volcan_id: Optional[int] = Query(None),
     descargado: Optional[bool] = Query(None),
     procesado: Optional[bool] = Query(None),
-    limite: int = Query(100, le=500),
+    limite: int = Query(100, le=5000),
     session = Depends(get_db)
 ):
     """Lista las imágenes disponibles"""
@@ -260,7 +260,7 @@ def listar_resultados(
     volcan_id: Optional[int] = Query(None),
     fecha_inicio: Optional[datetime] = Query(None),
     fecha_fin: Optional[datetime] = Query(None),
-    limite: int = Query(100, le=500),
+    limite: int = Query(100, le=5000),
     session = Depends(get_db)
 ):
     """Lista los resultados de flujo de SO2"""
@@ -414,20 +414,14 @@ def verificar_salud():
     }
     
     try:
+        from sqlalchemy import text
         session = get_session()
-        session.execute("SELECT 1")
+        session.execute(text("SELECT 1"))
         session.close()
         estado["base_datos"] = "ok"
     except Exception as e:
         estado["base_datos"] = f"error: {str(e)}"
-    
-    try:
-        mb = MessageBus()
-        mb.cerrar()
-        estado["message_bus"] = "ok"
-    except Exception as e:
-        estado["message_bus"] = f"error: {str(e)}"
-    
+
     return estado
 
 
@@ -435,7 +429,7 @@ def verificar_salud():
 def obtener_logs(
     nivel: Optional[str] = Query(None),
     componente: Optional[str] = Query(None),
-    limite: int = Query(100, le=500),
+    limite: int = Query(100, le=5000),
     session = Depends(get_db)
 ):
     """Obtiene los logs del sistema"""
@@ -553,7 +547,7 @@ def preview_imagen(
     try:
         import numpy as np
         import rasterio
-        from matplotlib import cm
+        import matplotlib
         from PIL import Image
         
         # Leer GeoTIFF
@@ -585,7 +579,7 @@ def preview_imagen(
         if colormap not in colormaps_validos:
             colormap = 'hot'
         
-        cmap = cm.get_cmap(colormap)
+        cmap = matplotlib.colormaps[colormap]
         rgba = cmap(normalized)
         
         # Píxeles NaN = transparente
@@ -631,8 +625,8 @@ def preview_imagen_con_pluma(
     session = Depends(get_db)
 ):
     """
-    Genera un preview PNG con la posición del volcán y dirección de pluma superpuesta.
-    Versión más completa que incluye anotaciones.
+    Genera un preview PNG combinando TODAS las pasadas del mismo día.
+    Superpone posición del volcán y dirección de pluma.
     """
     imagen = session.query(ImagenTROPOMI).get(imagen_id)
     if not imagen:
@@ -661,39 +655,70 @@ def preview_imagen_con_pluma(
         from matplotlib.colors import Normalize
         import math
         
-        with rasterio.open(imagen.ruta_archivo) as ds:
-            data = ds.read(1).astype(np.float64)
-            transform = ds.transform
-            bounds = ds.bounds
+        # Buscar TODAS las imágenes del mismo día y volcán
+        fecha_dia = imagen.fecha_adquisicion.date()
+        fecha_inicio_dia = datetime.combine(fecha_dia, datetime.min.time())
+        fecha_fin_dia = fecha_inicio_dia + timedelta(days=1)
         
-        # Limpiar datos
-        data[data <= 0] = np.nan
-        data[data < -1e30] = np.nan
+        imagenes_del_dia = session.query(ImagenTROPOMI).filter(
+            ImagenTROPOMI.volcan_id == imagen.volcan_id,
+            ImagenTROPOMI.fecha_adquisicion >= fecha_inicio_dia,
+            ImagenTROPOMI.fecha_adquisicion < fecha_fin_dia,
+            ImagenTROPOMI.descargado == True
+        ).all()
         
-        valid = data[~np.isnan(data)]
+        # Cargar y combinar todas las imágenes del día (máximo por píxel)
+        data_combined = None
+        bounds = None
+        n_imagenes = 0
+        
+        for img in imagenes_del_dia:
+            if not img.ruta_archivo or not Path(img.ruta_archivo).exists():
+                continue
+            try:
+                with rasterio.open(img.ruta_archivo) as ds:
+                    data = ds.read(1).astype(np.float64)
+                    img_bounds = ds.bounds
+                data[data <= 0] = np.nan
+                data[data < -1e30] = np.nan
+                
+                if data_combined is None:
+                    data_combined = data
+                    bounds = img_bounds
+                else:
+                    if data.shape == data_combined.shape:
+                        data_combined = np.fmax(data_combined, data)
+                    else:
+                        continue
+                n_imagenes += 1
+            except Exception as e:
+                logger.warning(f"Error leyendo imagen {img.id}: {e}")
+                continue
+        
+        if data_combined is None:
+            raise HTTPException(status_code=404, detail="No se pudieron cargar imágenes")
+        
+        valid = data_combined[~np.isnan(data_combined)]
         if len(valid) == 0:
             raise HTTPException(status_code=404, detail="Sin datos SO2 válidos")
         
-        # Crear figura con matplotlib
+        # Crear figura
         fig, ax = plt.subplots(1, 1, figsize=(8, 7), facecolor='#1a1a2e')
         ax.set_facecolor('#1a1a2e')
         
-        # Normalizar con percentiles
         vmin = np.percentile(valid, 5)
         vmax = np.percentile(valid, 95)
         
-        # Plot SO2
         extent = [bounds.left, bounds.right, bounds.bottom, bounds.top]
         im = ax.imshow(
-            data, extent=extent, origin='upper',
+            data_combined, extent=extent, origin='upper',
             cmap=colormap if colormap in ['hot','inferno','viridis','plasma','jet','magma','coolwarm'] else 'hot',
             norm=Normalize(vmin=vmin, vmax=vmax),
             interpolation='nearest', alpha=0.9
         )
         
-        # Colorbar
         cbar = plt.colorbar(im, ax=ax, shrink=0.8, pad=0.02)
-        cbar.set_label('SO₂ (mol/m²)', color='white', fontsize=10)
+        cbar.set_label('SO\u2082 (mol/m\u00b2)', color='white', fontsize=10)
         cbar.ax.yaxis.set_tick_params(color='white')
         plt.setp(plt.getp(cbar.ax.axes, 'yticklabels'), color='white', fontsize=8)
         
@@ -706,7 +731,7 @@ def preview_imagen_con_pluma(
                        color='#00ff88', fontsize=10, fontweight='bold',
                        bbox=dict(boxstyle='round,pad=0.3', facecolor='#1a1a2e', edgecolor='#00ff88', alpha=0.8))
         
-        # Dibujar dirección de pluma si hay resultado
+        # Dirección de pluma
         if resultado and volcan and resultado.azimut_pluma_grados is not None:
             azimut_rad = math.radians(resultado.azimut_pluma_grados)
             delta = (bounds.right - bounds.left) * 0.35
@@ -717,7 +742,6 @@ def preview_imagen_con_pluma(
                         xytext=(volcan.longitud, volcan.latitud),
                         arrowprops=dict(arrowstyle='->', color='#00d9ff', lw=2.5))
             
-            # Info texto
             info_lines = []
             if resultado.flujo_so2_ton_dia:
                 info_lines.append(f"Flujo: {resultado.flujo_so2_ton_dia:.1f} t/d")
@@ -725,16 +749,19 @@ def preview_imagen_con_pluma(
                 info_lines.append(f"Viento: {resultado.velocidad_viento_ms:.1f} m/s")
             if resultado.altitud_viento_m:
                 info_lines.append(f"Alt: {resultado.altitud_viento_m:.0f} m")
-            info_lines.append(f"Azimut: {resultado.azimut_pluma_grados:.1f}°")
+            info_lines.append(f"Azimut: {resultado.azimut_pluma_grados:.1f}\u00b0")
             
             info_text = '\n'.join(info_lines)
             ax.text(0.02, 0.98, info_text, transform=ax.transAxes,
                    fontsize=9, color='white', verticalalignment='top',
                    bbox=dict(boxstyle='round', facecolor='#16213e', edgecolor='#00d9ff', alpha=0.9))
         
-        # Título
-        fecha_str = imagen.fecha_adquisicion.strftime('%Y-%m-%d %H:%M') if imagen.fecha_adquisicion else 'Fecha desconocida'
-        ax.set_title(f"TROPOMI SO₂ — {fecha_str}", color='white', fontsize=12, pad=10)
+        # Título con cantidad de pasadas
+        fecha_str = fecha_dia.strftime('%Y-%m-%d')
+        titulo = f"TROPOMI SO\u2082 \u2014 {fecha_str}"
+        if n_imagenes > 1:
+            titulo += f" ({n_imagenes} pasadas combinadas)"
+        ax.set_title(titulo, color='white', fontsize=12, pad=10)
         
         ax.set_xlabel('Longitud', color='white', fontsize=9)
         ax.set_ylabel('Latitud', color='white', fontsize=9)
@@ -744,7 +771,6 @@ def preview_imagen_con_pluma(
         
         plt.tight_layout()
         
-        # Guardar en buffer
         buf = io.BytesIO()
         fig.savefig(buf, format='png', dpi=120, bbox_inches='tight',
                    facecolor=fig.get_facecolor(), edgecolor='none')
@@ -772,42 +798,94 @@ def preview_imagen_con_pluma(
 # ============== Endpoints de Google Earth Engine ==============
 
 @app.post("/api/gee/descargar", tags=["Google Earth Engine"])
-def descargar_desde_gee(request: GEEDescargaRequest, session = Depends(get_db)):
+def descargar_desde_gee(
+    request: GEEDescargaRequest,
+    background_tasks: BackgroundTasks,
+    session = Depends(get_db)
+):
     """
-    Descarga imágenes TROPOMI desde Google Earth Engine.
-    
+    Descarga imágenes TROPOMI desde Google Earth Engine en segundo plano.
+    No bloquea el request HTTP — cada imagen se registra en la base apenas
+    se descarga. Consultar progreso en GET /api/gee/progreso-descarga.
+
     Usa la misma colección que el profesor: COPERNICUS/S5P/NRTI/L3_SO2
     Guarda como GeoTIFF con resolución 1000m.
     """
-    from etl.gee_tropomi_downloader import descargar_tropomi_gee
-    
     volcan = session.query(Volcan).get(request.volcan_id)
     if not volcan:
         raise HTTPException(status_code=404, detail="Volcán no encontrado")
-    
+
+    _progreso_descarga['estado'] = 'procesando'
+    _progreso_descarga['total'] = 0
+    _progreso_descarga['descargadas'] = 0
+    _progreso_descarga['volcan'] = volcan.nombre
+    _progreso_descarga['mensaje'] = None
+    _progreso_descarga['exito'] = None
+
+    background_tasks.add_task(
+        _descargar_gee_background,
+        volcan_id=volcan.id,
+        volcan_nombre=volcan.nombre,
+        lat=volcan.latitud,
+        lon=volcan.longitud,
+        fecha_inicio=request.fecha_inicio,
+        fecha_fin=request.fecha_fin,
+        radio_km=request.radio_km,
+        una_por_dia=request.una_por_dia,
+    )
+
+    return {
+        "mensaje": f"Descarga iniciada en segundo plano para {volcan.nombre}",
+        "volcan": volcan.nombre,
+        "consultar_progreso": "/api/gee/progreso-descarga"
+    }
+
+
+# Estado global de la descarga GEE en curso
+_progreso_descarga = {
+    'estado': 'idle',
+    'total': 0,
+    'descargadas': 0,
+    'volcan': None,
+    'mensaje': None,
+    'exito': None,
+}
+
+
+def _descargar_gee_background(
+    volcan_id: int, volcan_nombre: str, lat: float, lon: float,
+    fecha_inicio: datetime, fecha_fin: datetime, radio_km: float, una_por_dia: bool
+):
+    """Descarga imágenes GEE en background, registrando cada una a medida que se baja."""
+    from etl.gee_tropomi_downloader import descargar_tropomi_gee
+
     try:
         resultado = descargar_tropomi_gee(
-            volcan_nombre=volcan.nombre,
-            lat=volcan.latitud,
-            lon=volcan.longitud,
-            fecha_inicio=request.fecha_inicio,
-            fecha_fin=request.fecha_fin,
-            radio_km=request.radio_km,
-            una_por_dia=request.una_por_dia,
-            registrar_db=True
+            volcan_nombre=volcan_nombre,
+            lat=lat,
+            lon=lon,
+            fecha_inicio=fecha_inicio,
+            fecha_fin=fecha_fin,
+            radio_km=radio_km,
+            una_por_dia=una_por_dia,
+            registrar_db=True,
+            volcan_id=volcan_id,
+            progreso=_progreso_descarga,
         )
-        
-        return {
-            "mensaje": "Descarga GEE completada" if resultado.get('exito') else "Error en descarga",
-            "volcan": volcan.nombre,
-            "resultado": resultado
-        }
-        
+        _progreso_descarga['exito'] = resultado.get('exito')
+        _progreso_descarga['mensaje'] = resultado.get('mensaje')
     except Exception as e:
         logger.error(f"Error descargando desde GEE: {e}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        _progreso_descarga['exito'] = False
+        _progreso_descarga['mensaje'] = str(e)
+    finally:
+        _progreso_descarga['estado'] = 'completado'
+
+
+@app.get("/api/gee/progreso-descarga", tags=["Google Earth Engine"])
+def progreso_descarga_gee():
+    """Consulta el progreso de la descarga GEE en curso."""
+    return _progreso_descarga
 
 
 @app.post("/api/gee/procesar/{imagen_id}", tags=["Google Earth Engine"])
@@ -822,8 +900,8 @@ def procesar_geotiff(
     Usa el método SO2FC con 6 franjas horarias, igual que el MATLAB del profesor.
     """
     from etl.geotiff_processor import GeoTIFFProcessor
-    from etl.ncep_downloader import obtener_viento_para_imagen as obtener_viento_ncep
-    from config.settings import SO2FC_FRANJAS_HORAS
+    from etl.era5_downloader import obtener_viento_para_imagen
+    from config.settings import SO2FC_FRANJAS_HORAS, SO2FC_MAX_PORCENTAJE_SIN_DATO
     
     # Obtener imagen
     imagen = session.query(ImagenTROPOMI).get(imagen_id)
@@ -841,6 +919,23 @@ def procesar_geotiff(
     try:
         # 1. Cargar y procesar GeoTIFF
         processor = GeoTIFFProcessor(imagen.ruta_archivo)
+
+        # Control de calidad: si más del 40% de la imagen no tiene dato,
+        # no se calcula flujo (mismo criterio que el MATLAB de referencia)
+        if not getattr(processor, 'calidad_ok', True):
+            processor.cerrar()
+            imagen.procesado = True
+            imagen.fecha_procesamiento = datetime.utcnow()
+            session.commit()
+            return {
+                "mensaje": "Imagen descartada por cobertura insuficiente",
+                "imagen_id": imagen_id,
+                "error": (
+                    f"{processor.porcentaje_sin_dato:.1f}% de píxeles sin dato "
+                    f"(máximo admitido: {SO2FC_MAX_PORCENTAJE_SIN_DATO}%)"
+                ),
+                "franjas": []
+            }
         
         # 2. Determinar fecha de la imagen
         fecha = imagen.fecha_adquisicion or processor.fecha
@@ -863,7 +958,7 @@ def procesar_geotiff(
         
         # 4. Obtener datos de viento PASANDO el azimut de pluma
         #    Así buscar_altura_por_azimut selecciona la altura correcta
-        viento = obtener_viento_ncep(
+        viento = obtener_viento_para_imagen(
             volcan_id=volcan.id,
             lat=volcan.latitud,
             lon=volcan.longitud,
@@ -873,10 +968,18 @@ def procesar_geotiff(
         )
         
         if not viento:
-            raise HTTPException(
-                status_code=500, 
-                detail="No se pudieron obtener datos de viento"
-            )
+            # Ningun nivel de la ventana coincide con el azimut de la pluma:
+            # no hay forma confiable de asignar un viento de transporte
+            processor.cerrar()
+            imagen.procesado = True
+            imagen.fecha_procesamiento = datetime.utcnow()
+            session.commit()
+            return {
+                "mensaje": "Imagen descartada: sin viento compatible con la pluma",
+                "imagen_id": imagen_id,
+                "error": "Ningun nivel de viento coincide con el azimut detectado",
+                "franjas": []
+            }
 
         velocidad_viento = viento['velocidad_ms']
         direccion_viento = viento['direccion_grados']
@@ -922,6 +1025,11 @@ def procesar_geotiff(
             direccion_viento_grados=direccion_viento,
             altitud_viento_m=viento.get('altura_m'),
             azimut_pluma_grados=azimut_pluma,
+            columna_so2_max=max(
+                (f['so2_molm2'] for f in resultado_calculo['franjas']
+                 if f.get('so2_molm2') is not None),
+                default=None
+            ),
             metadatos_json={
                 'metodo': 'SO2FC_GeoTIFF',
                 'franjas': resultado_calculo['franjas'],

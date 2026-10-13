@@ -22,7 +22,8 @@ import math
 
 from config.settings import (
     SO2FC_FRANJAS_HORAS, SO2FC_TOLERANCIA_HORA, SO2FC_TOLERANCIA_AZIMUT,
-    SO2FC_DISTANCIA_REFERENCIA, KGS_TO_TD_FACTOR, SO2FC_RADIO_MAXIMO_KM
+    SO2FC_DISTANCIA_REFERENCIA, KGS_TO_TD_FACTOR, SO2FC_RADIO_MAXIMO_KM,
+    SO2FC_MAX_PORCENTAJE_SIN_DATO
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -89,6 +90,19 @@ class GeoTIFFProcessor:
             
             # Leer banda 1 (SO2 en mol/m²)
             self.so2_molm2 = self.dataset.read(1).astype(np.float64)
+
+            # Control de calidad del MATLAB: la imagen solo se procesa si
+            # menos del 40% de sus píxeles carecen de dato.
+            #   if (sum(sum(isnan(SO2_Molm2)))*100)/numel(SO2_Molm2) < 40
+            sin_dato = np.isnan(self.so2_molm2) | (self.so2_molm2 <= -9000)
+            self.porcentaje_sin_dato = float(
+                sin_dato.sum() * 100.0 / self.so2_molm2.size
+            )
+            self.calidad_ok = self.porcentaje_sin_dato < SO2FC_MAX_PORCENTAJE_SIN_DATO
+            logger.info(
+                f"Píxeles sin dato: {self.porcentaje_sin_dato:.1f}% "
+                f"(límite {SO2FC_MAX_PORCENTAJE_SIN_DATO}%)"
+            )
             
             logger.info(f"GeoTIFF abierto: {self.ruta_archivo.name}")
             logger.info(f"Shape: {self.so2_molm2.shape}")
@@ -255,21 +269,28 @@ class GeoTIFFProcessor:
         
         logger.info(f"Distancias: min={np.nanmin(distancias)/1000:.1f}km, max={np.nanmax(distancias)/1000:.1f}km")
         
-        # Buscar máximo a ~60km (±5km)
-        tolerancia_dist = 5000  # metros
-        
-        for dist_ref in [distancia_referencia_m, 40000, 30000, 20000, 10000]:
-            mascara = np.abs(distancias - dist_ref) < tolerancia_dist
-            so2_selec = np.where(mascara, self.so2_molm2, np.nan)
-            
-            max_so2 = np.nanmax(so2_selec)
-            
-            if max_so2 > 0 and not np.isnan(max_so2):
-                logger.info(f"Pluma detectada a {dist_ref/1000:.0f}km, SO2_max={max_so2:.2e} mol/m²")
-                break
-        else:
-            logger.warning("No se detectó pluma")
+        # Buscar máximo en el anillo de 60 km (±2,5 km), como el MATLAB:
+        #   distS = distmSO2-60000; auxDist = distS>-2500 & distS<2500;
+        # El MATLAB no reintenta a distancias menores: si ahí no hay SO2,
+        # no hay pluma.
+        tolerancia_dist = 2500  # metros
+
+        mascara = np.abs(distancias - distancia_referencia_m) < tolerancia_dist
+        so2_selec = np.where(mascara, self.so2_molm2, np.nan)
+
+        max_so2 = np.nanmax(so2_selec) if np.any(~np.isnan(so2_selec)) else np.nan
+
+        if not (max_so2 > 0) or np.isnan(max_so2):
+            logger.warning(
+                f"No se detectó pluma en el anillo de "
+                f"{distancia_referencia_m/1000:.0f} km"
+            )
             return None
+
+        logger.info(
+            f"Pluma detectada a {distancia_referencia_m/1000:.0f}km, "
+            f"SO2_max={max_so2:.2e} mol/m²"
+        )
         
         # Encontrar ubicación del máximo
         idx_max = np.unravel_index(np.nanargmax(so2_selec), so2_selec.shape)

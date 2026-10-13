@@ -1,39 +1,40 @@
+# Versiones fijadas a partir del entorno verificado en funcionamiento.
+# No reemplazar por rangos abiertos: SQLAlchemy 2.1 cambio el driver por
+# defecto de PostgreSQL y matplotlib 3.9 elimino cm.get_cmap, y ambos
+# cambios rompieron el sistema al reconstruir la imagen.
 # API y Web
-fastapi>=0.104.0
-uvicorn>=0.24.0
-pydantic>=2.5.0
+fastapi==0.142.2
+uvicorn==0.54.0
+pydantic==2.13.5
 
 # Base de datos
-sqlalchemy>=2.0.0
-psycopg2-binary>=2.9.9
-alembic>=1.13.0
-
-# Message Bus
-pika>=1.3.2
+SQLAlchemy==2.1.1
+psycopg2-binary==2.9.13
+alembic==1.20.0
 
 # Procesamiento de datos científicos
-numpy>=1.24.0
-scipy>=1.11.0
-pandas>=2.1.0
-xarray>=2023.10.0
-netCDF4>=1.6.0
+numpy==2.4.6
+scipy==1.17.1
+pandas==3.0.6
+xarray==2026.9.0
+netCDF4==1.7.4
 
 # Descarga de datos
-requests>=2.31.0
-cdsapi>=0.6.1
+requests==2.34.2
+cdsapi==0.7.7
 
 # Visualización (para notebooks)
-matplotlib>=3.8.0
-seaborn>=0.13.0
+matplotlib==3.11.2
+seaborn==0.13.2
 
 # Utilidades
-python-dotenv>=1.0.0
-tqdm>=4.66.0
+python-dotenv==1.2.4
+tqdm==4.70.1
 
 # Testing
-pytest>=7.4.0
-pytest-asyncio>=0.21.0
-httpx>=0.25.0
+pytest==9.1.1
+pytest-asyncio==1.4.0
+httpx==0.28.1
 
-earthengine-api>=0.1.370
-rasterio>=1.3.0
+earthengine-api==1.7.46
+rasterio==1.4.4

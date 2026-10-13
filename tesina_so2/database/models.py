@@ -181,7 +181,7 @@ class LogProcesamiento(Base):
 def get_database_url():
     """Genera la URL de conexión a PostgreSQL"""
     return (
-        f"postgresql://{DATABASE_CONFIG['user']}:{DATABASE_CONFIG['password']}"
+        f"postgresql+psycopg2://{DATABASE_CONFIG['user']}:{DATABASE_CONFIG['password']}"
         f"@{DATABASE_CONFIG['host']}:{DATABASE_CONFIG['port']}/{DATABASE_CONFIG['database']}"
     )
 

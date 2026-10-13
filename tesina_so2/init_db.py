@@ -52,7 +52,7 @@ def main():
     
     # Verificar conexiones
     print("\n[3/3] Verificando sistema...")
-    
+
     # Verificar base de datos
     try:
         session = get_session()
@@ -61,16 +61,7 @@ def main():
         print(f"    ✓ Base de datos: {count} volcanes registrados")
     except Exception as e:
         print(f"    ✗ Base de datos: {e}")
-    
-    # Verificar RabbitMQ (opcional)
-    try:
-        from message_bus import MessageBus
-        mb = MessageBus()
-        mb.cerrar()
-        print("    ✓ RabbitMQ: conectado")
-    except Exception as e:
-        print(f"    ! RabbitMQ: {e} (opcional)")
-    
+
     print("\n" + "=" * 60)
     print("INICIALIZACIÓN COMPLETADA")
     print("=" * 60)

@@ -21,26 +21,6 @@ services:
     networks:
       - so2_network
 
-  # RabbitMQ - Message Bus
-  rabbitmq:
-    image: rabbitmq:3-management-alpine
-    container_name: so2_rabbitmq
-    environment:
-      RABBITMQ_DEFAULT_USER: guest
-      RABBITMQ_DEFAULT_PASS: guest
-    ports:
-      - "5672:5672"
-      - "15672:15672"  # Management UI
-    volumes:
-      - rabbitmq_data:/var/lib/rabbitmq
-    healthcheck:
-      test: rabbitmq-diagnostics -q ping
-      interval: 30s
-      timeout: 30s
-      retries: 3
-    networks:
-      - so2_network
-
   # API REST
   api:
     build:
@@ -53,18 +33,15 @@ services:
       - DB_NAME=so2_monitoring
       - DB_USER=postgres
       - DB_PASSWORD=postgres
-      - RABBITMQ_HOST=rabbitmq
-      - RABBITMQ_PORT=5672
-      - RABBITMQ_USER=guest
-      - RABBITMQ_PASSWORD=guest
       - API_HOST=0.0.0.0
       - API_PORT=8000
     ports:
       - "8000:8000"
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     depends_on:
       postgres:
-        condition: service_healthy
-      rabbitmq:
         condition: service_healthy
     volumes:
       - ./data:/app/data
@@ -72,69 +49,6 @@ services:
       - C:/Users/julia/.config/earthengine:/root/.config/earthengine:ro
        # Credenciales de ERA5/Copernicus
       - ./.cdsapirc:/root/.cdsapirc:ro
-    networks:
-      - so2_network
-
-  worker_calculos:
-    build:
-      context: .
-      dockerfile: Dockerfile.worker
-    container_name: so2_worker_calculos
-    command: python -m message_bus.message_bus calculos
-    environment:
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_NAME=so2_monitoring
-      - DB_USER=postgres
-      - DB_PASSWORD=postgres
-      - RABBITMQ_HOST=rabbitmq
-      - RABBITMQ_PORT=5672
-      - RABBITMQ_USER=guest
-      - RABBITMQ_PASSWORD=guest
-      - CDS_API_KEY=${CDS_API_KEY}
-    depends_on:
-      postgres:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-    volumes:
-      - ./data:/app/data
-      - ./.cdsapirc:/root/.cdsapirc:ro
-      - ./calculador:/app/calculador
-      - ./etl:/app/etl
-      # Credenciales de Google Earth Engine
-      - C:/Users/julia/.config/earthengine:/root/.config/earthengine:ro
-    networks:
-      - so2_network
-
-  # Worker de Extracción
-  worker_extraccion:
-    build:
-      context: .
-      dockerfile: Dockerfile.worker
-    container_name: so2_worker_extraccion
-    command: python -m message_bus.message_bus extraccion
-    environment:
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_NAME=so2_monitoring
-      - DB_USER=postgres
-      - DB_PASSWORD=postgres
-      - RABBITMQ_HOST=rabbitmq
-      - RABBITMQ_PORT=5672
-      - RABBITMQ_USER=guest
-      - RABBITMQ_PASSWORD=guest
-      - COPERNICUS_USERNAME=${COPERNICUS_USERNAME}
-      - COPERNICUS_PASSWORD=${COPERNICUS_PASSWORD}
-    depends_on:
-      postgres:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-    volumes:
-      - ./data:/app/data
-      # Credenciales de Google Earth Engine
-      - C:/Users/julia/.config/earthengine:/root/.config/earthengine:ro
     networks:
       - so2_network
 
@@ -179,8 +93,6 @@ services:
 
 volumes:
   postgres_data:
-  rabbitmq_data:
-  
 
 networks:
   so2_network:

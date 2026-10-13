@@ -37,19 +37,6 @@ DATABASE_CONFIG = {
     "password": os.getenv("DB_PASSWORD", "postgres"),
 }
 
-# RabbitMQ (Message Bus)
-RABBITMQ_CONFIG = {
-    "host": os.getenv("RABBITMQ_HOST", "localhost"),
-    "port": int(os.getenv("RABBITMQ_PORT", 5672)),
-    "user": os.getenv("RABBITMQ_USER", "guest"),
-    "password": os.getenv("RABBITMQ_PASSWORD", "guest"),
-    "virtual_host": os.getenv("RABBITMQ_VHOST", "/"),
-}
-
-# Comandos del Message Bus
-CMD_CALCULOS_FINALES = "CMD_CALCULOS_FINALES"
-CMD_NUEVA_EXTRACCION = "CMD_NUEVA_EXTRACCION"
-
 # API REST
 API_HOST = os.getenv("API_HOST", "0.0.0.0")
 API_PORT = int(os.getenv("API_PORT", 8000))
@@ -87,6 +74,16 @@ SO2FC_TOLERANCIA_AZIMUT = 30
 
 # Distancia de referencia para detectar azimut de pluma (metros)
 SO2FC_DISTANCIA_REFERENCIA = 60000  # 60 km
+
+# Porcentaje máximo de píxeles sin dato admitido para procesar una imagen
+# MATLAB: if (sum(sum(isnan(SO2_Molm2)))*100)/numel(SO2_Molm2) < 40
+SO2FC_MAX_PORCENTAJE_SIN_DATO = 40
+
+# Ventana vertical donde se busca el viento de la pluma, medida desde la
+# altura del crater hacia arriba (metros). Acota la busqueda al rango
+# fisicamente esperable para una pluma de desgasificacion pasiva y evita
+# que se seleccionen niveles de la corriente en chorro.
+SO2FC_VENTANA_ALTURA_M = 2000
 
 # Radio máximo de búsqueda (AOI - Area of Interest)
 # Similar al clip(AOI) de Google Earth Engine

@@ -37,7 +37,10 @@ class GEETROPOMIDownloader:
     """Descargador de imágenes TROPOMI SO2 usando Google Earth Engine."""
     
     COLLECTION_ID = 'COPERNICUS/S5P/NRTI/L3_SO2'
-    BAND_VCD = 'SO2_column_number_density'
+    # Producto con perfil a priori de 15 km, indicado para plumas volcanicas.
+    # El producto de 7 km, preferible para plumas de altura intermedia, no
+    # esta publicado en las colecciones L3 de Google Earth Engine.
+    BAND_VCD = 'SO2_column_number_density_15km'
     SCALE = 1000
     CRS = 'EPSG:4326'
     GEE_PROJECT = 'turing-terminus-398901'
@@ -82,36 +85,34 @@ class GEETROPOMIDownloader:
         
         try:
             aoi = self._crear_aoi(lat, lon, radio_km)
-            
+
             collection = ee.ImageCollection(self.COLLECTION_ID) \
                 .filterBounds(aoi) \
                 .filterDate(
                     fecha_inicio.strftime('%Y-%m-%d'),
                     (fecha_fin + timedelta(days=1)).strftime('%Y-%m-%d')
-                )
-            
+                ) \
+                .sort('system:time_start')
+
             n_images = collection.size().getInfo()
             logger.info(f"Encontradas {n_images} imágenes TROPOMI en GEE")
-            
+
             if n_images == 0:
                 return []
-            
-            image_list = collection.toList(min(n_images, 50))
+
+            # Un solo request para todos los timestamps, en vez de un getInfo()
+            # por imagen (evita el corte artificial que dejaba afuera el resto del rango)
+            timestamps = collection.aggregate_array('system:time_start').getInfo()
+
             imagenes = []
-            
-            for i in range(min(n_images, 50)):
-                img = ee.Image(image_list.get(i))
-                props = img.getInfo()['properties']
-                time_start = props.get('system:time_start', 0)
+            for i, time_start in enumerate(timestamps):
                 fecha = datetime.fromtimestamp(time_start / 1000)
-                
                 imagenes.append({
                     'index': i,
                     'fecha': fecha,
                     'fecha_str': fecha.strftime('%Y%m%d-%H%M')
                 })
-            
-            imagenes.sort(key=lambda x: x['fecha'])
+
             return imagenes
             
         except Exception as e:
@@ -324,16 +325,24 @@ class GEETROPOMIDownloader:
         fecha_inicio: datetime,
         fecha_fin: datetime,
         radio_km: float = 100,
-        una_por_dia: bool = True
+        una_por_dia: bool = True,
+        volcan_id: Optional[int] = None,
+        registrar_db: bool = False,
+        progreso: Optional[Dict] = None
     ) -> List[str]:
-        """Descarga imágenes para un rango de fechas"""
-        
+        """Descarga imágenes para un rango de fechas.
+
+        Si registrar_db=True, cada imagen se registra en la base apenas se
+        descarga (en vez de esperar a que termine todo el rango), para que
+        el progreso sea visible mientras la descarga está en curso.
+        """
+
         imagenes = self.buscar_imagenes(lat, lon, fecha_inicio, fecha_fin, radio_km)
-        
+
         if not imagenes:
             logger.warning("No se encontraron imágenes")
             return []
-        
+
         # Filtrar una por día
         if una_por_dia:
             por_dia = {}
@@ -343,7 +352,11 @@ class GEETROPOMIDownloader:
                     por_dia[dia] = img
             imagenes = list(por_dia.values())
             logger.info(f"Filtradas a {len(imagenes)} imágenes (una por día)")
-        
+
+        if progreso is not None:
+            progreso['total'] = len(imagenes)
+            progreso['descargadas'] = 0
+
         # Descargar
         archivos = []
         for img_info in imagenes:
@@ -357,12 +370,52 @@ class GEETROPOMIDownloader:
                 )
                 if archivo:
                     archivos.append(archivo)
+                    if registrar_db and volcan_id is not None:
+                        self._registrar_imagen(volcan_id, archivo, img_info['fecha'])
             except Exception as e:
                 logger.error(f"Error: {e}")
                 continue
-        
+            finally:
+                if progreso is not None:
+                    progreso['descargadas'] += 1
+
         logger.info(f"Descargadas {len(archivos)} imágenes")
         return archivos
+
+    def _registrar_imagen(self, volcan_id: int, archivo: str, fecha: datetime) -> Optional[str]:
+        """Registra una imagen ya descargada en la base de datos."""
+        if get_session is None or ImagenTROPOMI is None:
+            return None
+
+        session = get_session()
+        try:
+            nombre = Path(archivo).name
+
+            existente = session.query(ImagenTROPOMI).filter_by(
+                volcan_id=volcan_id,
+                ruta_archivo=archivo
+            ).first()
+            if existente:
+                return None
+
+            imagen = ImagenTROPOMI(
+                volcan_id=volcan_id,
+                producto_id=f"GEE_{nombre}",
+                nombre_archivo=nombre,
+                fecha_adquisicion=fecha,
+                ruta_archivo=archivo,
+                descargado=True,
+                procesado=False,
+            )
+            session.add(imagen)
+            session.commit()
+            return nombre
+        except Exception as e:
+            logger.error(f"Error registrando imagen en DB: {e}")
+            session.rollback()
+            return None
+        finally:
+            session.close()
 
 
 def descargar_tropomi_gee(
@@ -373,19 +426,35 @@ def descargar_tropomi_gee(
     fecha_fin: datetime,
     radio_km: float = 100,
     una_por_dia: bool = True,
-    registrar_db: bool = True
+    registrar_db: bool = True,
+    volcan_id: Optional[int] = None,
+    progreso: Optional[Dict] = None
 ) -> Dict:
-    """Función principal para descargar imágenes TROPOMI desde GEE"""
-    
+    """Función principal para descargar imágenes TROPOMI desde GEE.
+
+    Cada imagen se registra en la base apenas se descarga (no al terminar
+    todo el rango), así el progreso es visible mientras la descarga corre.
+    """
+
     downloader = GEETROPOMIDownloader()
-    
+
     if not downloader.initialized:
         return {
             'exito': False,
             'mensaje': 'No se pudo inicializar Google Earth Engine',
             'imagenes': []
         }
-    
+
+    if registrar_db and volcan_id is None and get_session is not None:
+        session = get_session()
+        volcan = session.query(Volcan).filter_by(nombre=volcan_nombre).first()
+        if not volcan:
+            volcan = session.query(Volcan).filter(
+                Volcan.nombre.ilike(f'%{volcan_nombre}%')
+            ).first()
+        volcan_id = volcan.id if volcan else None
+        session.close()
+
     archivos = downloader.descargar_rango_fechas(
         volcan_nombre=volcan_nombre,
         lat=lat,
@@ -393,57 +462,14 @@ def descargar_tropomi_gee(
         fecha_inicio=fecha_inicio,
         fecha_fin=fecha_fin,
         radio_km=radio_km,
-        una_por_dia=una_por_dia
+        una_por_dia=una_por_dia,
+        volcan_id=volcan_id,
+        registrar_db=registrar_db and volcan_id is not None,
+        progreso=progreso
     )
-    
-    # Registrar en DB
-    imagenes_registradas = []
-    if registrar_db and archivos and get_session is not None:
-        try:
-            session = get_session()
-            volcan = session.query(Volcan).filter_by(nombre=volcan_nombre).first()
-            if not volcan:
-                volcan = session.query(Volcan).filter(
-                    Volcan.nombre.ilike(f'%{volcan_nombre}%')
-                ).first()
-            
-            if volcan:
-                for archivo in archivos:
-                    nombre = Path(archivo).name
-                    partes = nombre.split('_')
-                    try:
-                        fecha = datetime.strptime(partes[1], '%Y%m%d-%H%M')
-                    except:
-                        fecha = datetime.now()
-                    
-                    existente = session.query(ImagenTROPOMI).filter_by(
-                        volcan_id=volcan.id,
-                        ruta_archivo=archivo
-                    ).first()
-                    
-                    if not existente:
-                        imagen = ImagenTROPOMI(
-                            volcan_id=volcan.id,
-                            producto_id=f"GEE_{nombre}",
-                            nombre_archivo=nombre,
-                            fecha_adquisicion=fecha,
-                            ruta_archivo=archivo,
-                            descargado=True,
-                            procesado=False,
-                        )
-                        session.add(imagen)
-                        imagenes_registradas.append(nombre)
-                
-                session.commit()
-                logger.info(f"Registradas {len(imagenes_registradas)} imágenes en DB")
-            
-            session.close()
-        except Exception as e:
-            logger.error(f"Error registrando en DB: {e}")
-    
+
     return {
         'exito': len(archivos) > 0,
         'mensaje': f'Descargadas {len(archivos)} imágenes',
-        'imagenes': archivos,
-        'registradas': imagenes_registradas
+        'imagenes': archivos
     }

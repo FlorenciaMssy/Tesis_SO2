@@ -417,7 +417,7 @@
 
         async function cargarDatosVolcan(volcanId) {
             try {
-                const data = await (await fetch(`${API}/resultados?volcan_id=${volcanId}&limite=100`)).json();
+                const data = await (await fetch(`${API}/resultados?volcan_id=${volcanId}&limite=5000`)).json();
                 if(!data.length) { chartDashboard.data.labels=[]; chartDashboard.data.datasets[0].data=[]; chartDashboard.update(); return; }
                 const porDia = {};
                 data.forEach(r => { const f=r.fecha_hora.split('T')[0]; if(!porDia[f]) porDia[f]=[]; if(r.flujo_so2_ton_dia) porDia[f].push(r.flujo_so2_ton_dia); });
@@ -429,7 +429,7 @@
         }
 
         async function loadImagenes() {
-            try { imagenes = await (await fetch(`${API}/imagenes`)).json(); renderImagenes(); loadStats(); } catch(e) {}
+            try { imagenes = await (await fetch(`${API}/imagenes?limite=5000`)).json(); renderImagenes(); loadStats(); } catch(e) {}
         }
 
         function renderImagenes() {
@@ -441,7 +441,7 @@
             const checkedIds = new Set([...document.querySelectorAll('.img-check:checked')].map(c => c.value));
             document.querySelector('#tablaImagenes tbody').innerHTML = lista.map((i, idx) => {
                 const v = volcanes.find(x=>x.id===i.volcan_id);
-                const estado = i.procesado ? '<span class="badge bg-success">OK</span>' : i.descargado ? '<span class="badge bg-warning">Pend</span>' : '<span class="badge bg-secondary">-</span>';
+                const estado = i.procesado ? '<span class="badge bg-success">OK</span>' : i.descargado ? '<span class="badge bg-warning">Pendiente</span>' : '<span class="badge bg-secondary">-</span>';
                 const checked = checkedIds.has(String(i.id)) ? ' checked' : '';
                 return `<tr><td><input type="checkbox" class="img-check" value="${i.id}"${checked}></td><td>${idx + 1}</td><td>${new Date(i.fecha_adquisicion).toLocaleDateString('es-AR')}</td><td>${v?.nombre||'-'}</td><td>${estado}</td><td>${i.descargado && !i.procesado ? `<button class="btn btn-sm btn-primary" onclick="procesarImagen(${i.id})"><i class="bi bi-gear"></i></button>`:''}<button class="btn btn-sm btn-outline-danger ms-1" onclick="borrarImagen(${i.id})"><i class="bi bi-trash"></i></button></td></tr>`;
             }).join('');
@@ -449,7 +449,8 @@
 
         async function iniciarExtraccion() {
             const btn = document.getElementById('btnIniciarExtraccion');
-            btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Descargando...';
+            btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Iniciando...';
+            const restaurarBtn = () => { btn.disabled = false; btn.innerHTML = '<i class="bi bi-cloud-download"></i> Descargar desde GEE'; };
             try {
                 const data = {
                     volcan_id: parseInt(document.getElementById('volcanExtraccion').value),
@@ -459,10 +460,31 @@
                     una_por_dia: false
                 };
                 const res = await fetch(`${API}/gee/descargar`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) });
-                if(res.ok) { showToast('Descarga completada', 'success'); loadImagenes(); }
-                else { const err = await res.json(); showToast(err.detail || 'Error', 'error'); }
-            } catch(e) { showToast('Error de conexión', 'error'); }
-            btn.disabled = false; btn.innerHTML = '<i class="bi bi-cloud-download"></i> Descargar desde GEE';
+                if(!res.ok) { const err = await res.json(); showToast(err.detail || 'Error', 'error'); restaurarBtn(); return; }
+                showToast('Descarga iniciada en segundo plano...', 'info');
+                // Polling de progreso
+                const pollInterval = setInterval(async () => {
+                    try {
+                        const prog = await (await fetch(`${API}/gee/progreso-descarga`)).json();
+                        if(prog.estado === 'idle') {
+                            clearInterval(pollInterval);
+                            showToast('La descarga se interrumpió (el servidor se reinició)', 'warning');
+                            restaurarBtn(); loadImagenes();
+                            return;
+                        }
+                        btn.innerHTML = prog.total
+                            ? `<span class="spinner-border spinner-border-sm"></span> ${prog.descargadas}/${prog.total}...`
+                            : '<span class="spinner-border spinner-border-sm"></span> Buscando imágenes...';
+                        loadImagenes();
+                        if(prog.estado === 'completado') {
+                            clearInterval(pollInterval);
+                            showToast(prog.mensaje || 'Descarga completada', prog.exito ? 'success' : 'warning');
+                            restaurarBtn();
+                            loadImagenes();
+                        }
+                    } catch(e) {}
+                }, 3000);
+            } catch(e) { showToast('Error de conexión', 'error'); restaurarBtn(); }
         }
 
         async function procesarImagen(id) {
@@ -487,6 +509,13 @@
                 const pollInterval = setInterval(async () => {
                     try {
                         const prog = await (await fetch(`${API}/gee/progreso-lote`)).json();
+                        if(prog.estado === 'idle') {
+                            clearInterval(pollInterval);
+                            showToast('El procesamiento se interrumpió (el servidor se reinició)', 'warning');
+                            btn.disabled = false; btn.innerHTML = '<i class="bi bi-play-fill"></i> Procesar Pendientes';
+                            loadImagenes();
+                            return;
+                        }
                         btn.innerHTML = `<span class="spinner-border spinner-border-sm"></span> ${prog.procesadas}/${prog.total}...`;
                         if(prog.estado === 'completado') {
                             clearInterval(pollInterval);
@@ -512,7 +541,7 @@
             const v = document.getElementById('volcanResultados').value;
             const d = document.getElementById('fechaDesde').value;
             const h = document.getElementById('fechaHasta').value;
-            let url = `${API}/resultados?`;
+            let url = `${API}/resultados?limite=5000&`;
             if(v) url += `volcan_id=${v}&`; if(d) url += `fecha_inicio=${d}&`; if(h) url += `fecha_fin=${h}`;
             try {
                 resultados = await (await fetch(url)).json();
@@ -713,7 +742,7 @@
             document.getElementById('statVolcanes').textContent = volcanes.length;
             document.getElementById('statImagenes').textContent = imagenes.length;
             try {
-                const all = await (await fetch(`${API}/resultados?limite=100`)).json();
+                const all = await (await fetch(`${API}/resultados?limite=5000`)).json();
                 document.getElementById('statResultados').textContent = all.length;
                 document.getElementById('statUltimo').textContent = all.length && all[0].flujo_so2_ton_dia ? all[0].flujo_so2_ton_dia.toFixed(0) : '-';
                 // Actividad reciente
